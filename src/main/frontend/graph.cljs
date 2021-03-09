@@ -175,5 +175,14 @@
         (case @graph-mode
           :dot-text
           (dot-text-mode node ctx global-scale dark?)
-          (dot-mode node ctx global-scale dark?)))}
+          (dot-mode node ctx global-scale dark?)))
+
+      :onNodeDragEnd    (fn [node]
+                          (do (set! (.-fx node) (gobj/get node "x"))
+                              (set! (.-fy node) (gobj/get node "y"))))
+      :onNodeRightClick (fn [node]
+                          (do (set! (.-fx node) nil)
+                              (set! (.-fy node) nil)))}
+
      option)))
+
