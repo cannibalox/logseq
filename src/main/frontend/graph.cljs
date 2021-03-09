@@ -185,8 +185,8 @@
                           (do (aset node "fx" (gobj/get node "x"))
                               (aset node "fy" (gobj/get node "y"))))
       :onNodeRightClick (fn [node]
-                          (do (set! (.-fx node) nil)
-                              (set! (.-fy node) nil)))}
+                          (do (aset node "fx" nil)
+                              (aset node "fy" nil)))}
 
      option)))
 
