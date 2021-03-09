@@ -147,6 +147,8 @@
       :d3VelocityDecay 0.2  ;; kc
       :onNodeHover on-node-hover
       :onLinkHover on-link-hover
+      ;;20210310 ph
+      :alphaDecay 0.5
       :nodeVal 100
       :nodeLabel "id"
       :linkColor (fn [] (if dark? "rgba(255,255,255,0.2)" "rgba(0,0,0,0.1)"))
@@ -187,7 +189,8 @@
                               (aset node "fy" (gobj/get node "y"))))
       :onNodeRightClick (fn [node]
                           (do (aset node "fx" nil)
-                              (aset node "fy" nil)))}
+                              (aset node "fy" nil)))
+          }
 
      option)))
 
