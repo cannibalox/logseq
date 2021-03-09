@@ -68,7 +68,7 @@
     (.arc ctx x y (if (zero? val)
                     arc-radius
                     (* arc-radius (js/Math.sqrt (js/Math.sqrt val)))) 0 (* 2 js/Math.PI) false)
-    (set! (.-fillStyle ctx) (if dark? "#7ad186" "#222")) ;; hpx change color
+    (set! (.-fillStyle ctx) (if dark? "#759f8f" "#222")) ;; hpx change color
     (.fill ctx)))
 
 (defn- dot-text-mode
@@ -149,6 +149,7 @@
       :onLinkHover on-link-hover
       ;;20210310 ph
       :alphaDecay 0.5
+      :velocityDecay 0.2
       :nodeVal 100
       :nodeLabel "id"
       :linkColor (fn [] (if dark? "rgba(255,255,255,0.2)" "rgba(0,0,0,0.1)"))
