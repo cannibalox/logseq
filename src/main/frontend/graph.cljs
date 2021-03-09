@@ -76,6 +76,7 @@
   (let [label (gobj/get node "id")
         val (gobj/get node "val")
         val (if (zero? val) 1 val)
+        highlighted (contains? @highlight-nodes label)
         font-size (min
                    10
                    (* (/ 15 global-scale) (js/Math.cbrt val)))
@@ -85,7 +86,7 @@
         text-width (gobj/get (.measureText ctx label) "width")
         x (gobj/get node "x")
         y (gobj/get node "y")
-        color (gobj/get node "color")]
+        color (if highlighted "#a00" (gobj/get node "color"))]
     (set! (.-filltextAlign ctx) "center")
     (set! (.-textBaseLine ctx) "middle")
     (set! (.-fillStyle ctx) color)
@@ -98,7 +99,7 @@
                     arc-radius
                     (* arc-radius (js/Math.sqrt (js/Math.sqrt val)))) 0 (* 2 js/Math.PI) false)
     (set! (.-fillStyle ctx)
-          (if (contains? @highlight-nodes label)
+          (if highlighted
             (if dark? "#ff2222" "#4C51BF")
             (if dark? "#6fe87d" "#666")))
     (.fill ctx)))
@@ -141,9 +142,11 @@
                                                   :target (-> (gobj/get link "target")
                                                               (gobj/get "id"))}]
                                         (if (contains? @highlight-links link) 2 0)))
+      :d3Force "FWHUF" ;; kc
       :d3VelocityDecay 0.2  ;; kc
       :onNodeHover on-node-hover
       :onLinkHover on-link-hover
+      :nodeVal 100
       :nodeLabel "id"
       :linkColor (fn [] (if dark? "rgba(255,255,255,0.2)" "rgba(0,0,0,0.1)"))
       :onZoom (fn [z]
