@@ -141,7 +141,7 @@
                                                               (gobj/get "id"))
                                                   :target (-> (gobj/get link "target")
                                                               (gobj/get "id"))}]
-                                        (if (contains? @highlight-links link) 4 0)))
+                                        (if (contains? @highlight-links link) 3 0)))
       :linkDirectionalParticleColor (fn [] (if dark? "#ff2222" "rgba(0,0,0,0.1)"))                                   
       :d3Force "FWHUF" ;; kc
       :d3VelocityDecay 0.2  ;; kc
@@ -181,7 +181,7 @@
           :dot-text
           (dot-text-mode node ctx global-scale dark?)
           (dot-mode node ctx global-scale dark?)))
-      ;; drag to pin - kc
+      ;; drag to pin - ph replaced `set!` by `aset` 0.0.11
       :onNodeDragEnd    (fn [node]
                           (do (aset node "fx" (gobj/get node "x"))
                               (aset node "fy" (gobj/get node "y"))))
