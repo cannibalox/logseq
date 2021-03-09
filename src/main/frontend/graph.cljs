@@ -68,7 +68,7 @@
     (.arc ctx x y (if (zero? val)
                     arc-radius
                     (* arc-radius (js/Math.sqrt (js/Math.sqrt val)))) 0 (* 2 js/Math.PI) false)
-    (set! (.-fillStyle ctx) (if dark? "#aaa" "#222"))
+    (set! (.-fillStyle ctx) (if dark? "#7ad186" "#222")) ;; hpx change color
     (.fill ctx)))
 
 (defn- dot-text-mode
@@ -141,7 +141,8 @@
                                                               (gobj/get "id"))
                                                   :target (-> (gobj/get link "target")
                                                               (gobj/get "id"))}]
-                                        (if (contains? @highlight-links link) 2 0)))
+                                        (if (contains? @highlight-links link) 4 0)))
+      :linkDirectionalParticleColor (fn [] (if dark? "#ff2222" "rgba(0,0,0,0.1)"))                                   
       :d3Force "FWHUF" ;; kc
       :d3VelocityDecay 0.2  ;; kc
       :onNodeHover on-node-hover
