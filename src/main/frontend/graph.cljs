@@ -99,8 +99,8 @@
                     (* arc-radius (js/Math.sqrt (js/Math.sqrt val)))) 0 (* 2 js/Math.PI) false)
     (set! (.-fillStyle ctx)
           (if (contains? @highlight-nodes label)
-            (if dark? "#A3BFFA" "#4C51BF")
-            (if dark? "#999" "#666")))
+            (if dark? "#ff2222" "#4C51BF")
+            (if dark? "#6fe87d" "#666")))
     (.fill ctx)))
 
 (defn build-graph-data
@@ -141,6 +141,7 @@
                                                   :target (-> (gobj/get link "target")
                                                               (gobj/get "id"))}]
                                         (if (contains? @highlight-links link) 2 0)))
+      :d3VelocityDecay 0.2  ;; kc
       :onNodeHover on-node-hover
       :onLinkHover on-link-hover
       :nodeLabel "id"
@@ -176,7 +177,7 @@
           :dot-text
           (dot-text-mode node ctx global-scale dark?)
           (dot-mode node ctx global-scale dark?)))
-
+      ;; drag to pin - kc
       :onNodeDragEnd    (fn [node]
                           (do (set! (.-fx node) (gobj/get node "x"))
                               (set! (.-fy node) (gobj/get node "y"))))
