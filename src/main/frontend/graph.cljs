@@ -182,8 +182,8 @@
           (dot-mode node ctx global-scale dark?)))
       ;; drag to pin - kc
       :onNodeDragEnd    (fn [node]
-                          (do (aset node "fx") (gobj/get node "x"))
-                              (aset node "fy") (gobj/get node "y"))))
+                          (do (aset node "fx") (gobj/get node "x")
+                              (aset node "fy") (gobj/get node "y")))
       :onNodeRightClick (fn [node]
                           (do (set! (.-fx node) nil)
                               (set! (.-fy node) nil)))}
