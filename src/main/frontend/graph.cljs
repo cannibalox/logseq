@@ -183,7 +183,7 @@
       ;; drag to pin - kc
       :onNodeDragEnd    (fn [node]
                           (do (aset node "fx" (gobj/get node "x"))
-                              (aset node "fy" (gobj/get node "y")))
+                              (aset node "fy" (gobj/get node "y"))))
       :onNodeRightClick (fn [node]
                           (do (set! (.-fx node) nil)
                               (set! (.-fy node) nil)))}
