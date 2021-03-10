@@ -497,8 +497,7 @@
           (str (t :dot-mode)
                (if @dot-mode? " (ON)"))]]
         [:div "drag nodes to pin them"]
-        [:div "rmb on node to unpin it"]
-        [:div "lmb on node to search for related blocks"]]])))
+        [:div "rmb : release node"]]])))
 
 
 (rum/defc all-pages < rum/reactive
