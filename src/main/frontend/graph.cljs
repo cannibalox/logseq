@@ -148,6 +148,15 @@
       :onNodeHover on-node-hover
       :onLinkHover on-link-hover
       ;;20210310 ph
+      :force {:size [1 1 1]
+                                 :linkStrength 1
+                                 :friction 0.9
+                                 :linkDistance 20
+                                 :charge -30
+                                 :gravity 0.1
+                                 :theta 0.8
+                                 :alpha 0.1}
+      :linkHoverPrecision 0
       :alphaDecay 0.5
       :velocityDecay 0.2
       :nodeVal 100
