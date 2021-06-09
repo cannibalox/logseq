@@ -81,6 +81,7 @@
     :editor/show-input nil
     :editor/last-saved-cursor nil
     :editor/editing? nil
+    :editor/last-edit-block-input-id nil
     :editor/last-edit-block-id nil
     :editor/in-composition? false
     :editor/content {}
@@ -203,9 +204,9 @@
   (true? (:feature/enable-grammarly?
           (get (sub-config) (get-current-repo)))))
 
-(defn store-all-ids-in-text?
-  []
-  (true? (:text/store-all-ids (get-config))))
+;; (defn store-block-id-in-file?
+;;   []
+;;   (true? (:block/store-id-in-file? (get-config))))
 
 (defn scheduled-deadlines-disabled?
   []
@@ -430,7 +431,7 @@
 
 (defn get-last-edit-input-id
   []
-  (:editor/last-edit-block-id @state))
+  (:editor/last-edit-block-input-id @state))
 
 (defn editing?
   []
@@ -698,6 +699,10 @@
 
 (defn get-last-edit-block
   []
+  (:editor/last-edit-block @state))
+
+(defn get-current-edit-block-and-position
+  []
   (let [edit-input-id (get-edit-input-id)
         edit-block (get-edit-block)
         block-element (when edit-input-id (gdom/getElement (string/replace edit-input-id "edit-block" "ls-block")))
@@ -727,7 +732,8 @@
                     (assoc
                      :editor/block block
                      :editor/editing? {edit-input-id true}
-                     :editor/last-edit-block-id edit-input-id
+                     :editor/last-edit-block-input-id edit-input-id
+                     :editor/last-edit-block block
                      :cursor-range cursor-range))))
 
        (when-let [input (gdom/getElement edit-input-id)]
@@ -1303,3 +1309,7 @@
    (clear-edit!)
    (set-selection-blocks! blocks direction)
    (util/select-highlight! blocks)))
+
+(defn get-favorites-name
+  []
+  (:name/favorites (get-config)))
