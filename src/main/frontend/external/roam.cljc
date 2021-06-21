@@ -5,7 +5,8 @@
             [medley.core :as medley]
             [clojure.walk :as walk]
             [clojure.string :as string]
-            [frontend.util :as util]))
+            [frontend.util :as util]
+            [frontend.text :as text]))
 
 (defonce all-refed-uids (atom #{}))
 (defonce uid->uuid (atom {}))
@@ -19,7 +20,7 @@
 ;; DONE: 2. merge pages with same names (case-sensitive)
 ;; DONE: 3. mldoc add support to roam research macros, or we can transform here.
 ;; DONE: 4. mldoc add support to nested links
-;; TODO: 5. Roam attributes -> properties
+;; DONE: 5. Roam attributes -> properties
 ;; TODO: 6. hiccup
 
 (defonce uid-pattern #"\(\(([a-zA-Z0-9_\\-]{6,24})\)\)")
@@ -34,12 +35,9 @@
 (defn macro-transform
   [text]
   (string/replace text macro-pattern (fn [[original text]]
-                                       (let [[name arg] (-> (string/replace text #" " "")
-                                                            (string/split #":"))]
+                                       (let [[name arg] (util/split-first ":" text)]
                                          (if name
-                                           (let [name (case name
-                                                        "[[embed]]" "embed"
-                                                        name)]
+                                           (let [name (text/page-ref-un-brackets! name)]
                                              (util/format "{{%s %s}}" name arg))
                                            original)))))
 
@@ -84,10 +82,13 @@
   (when-not (and (get @uid->uuid uid) uid)
     (swap! uid->uuid assoc uid (medley/random-uuid)))
   (let [children-text (children->text children (inc level))
-        level-pattern (apply str (repeat level "#"))
+        level-pattern (str (apply str (repeat level "\t"))
+                           (if (zero? level)
+                             "-"
+                             " -"))
         properties (when (contains? @all-refed-uids uid)
                      (str
-                      (util/format ":PROPERTIES:\n:ID:%s\n:END:"
+                      (util/format "id:: %s"
                                    (str (get @uid->uuid uid)))
                       "\n"))]
     (if string
@@ -103,9 +104,9 @@
 (defn ->file
   [page-data]
   (let [{:keys [create-time title children edit-time]} page-data
-        initial-level 2
+        initial-level 1
         text (when (seq children)
-               (when-let [text (children->text children initial-level)]
+               (when-let [text (children->text children (dec initial-level))]
                  (let [front-matter (util/format "---\ntitle: %s\n---\n\n" title)]
                    (str front-matter (transform text)))))]
     (when (and (not (string/blank? title))

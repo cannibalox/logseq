@@ -25,6 +25,12 @@
             [frontend.db-mixins :as db-mixins]
             [frontend.config :as config]))
 
+(rum/defc toggle
+  []
+  (when-not (util/mobile?)
+    [:a.opacity-60.hover:opacity-100.ml-4 {:on-click state/toggle-sidebar-open?!}
+    (svg/menu)]))
+
 (rum/defc block-cp < rum/reactive
   [repo idx block]
   (let [id (:block/uuid block)]
@@ -39,24 +45,30 @@
               :sidebar?   true
               :repo       repo}))
 
-(rum/defc page-graph < db-mixins/query
-  [page]
-  (let [theme (:ui/theme @state/state)
+(rum/defc page-graph < db-mixins/query rum/reactive
+  []
+  (let [page (or
+              (and (= :page (state/sub [:route-match :data :name]))
+                   (state/sub [:route-match :path-params :name]))
+              (date/today))
+        theme (:ui/theme @state/state)
         dark? (= theme "dark")
         graph (if (util/uuid-string? page)
                 (graph-handler/build-block-graph (uuid page) theme)
                 (graph-handler/build-page-graph page theme))]
     (when (seq (:nodes graph))
-      [:div.sidebar-item.flex-col.flex-1
+      [:div.sidebar-item.flex-col
        (graph-2d/graph
         (graph/build-graph-opts
-         graph dark? false
+         graph dark?
          {:width  600
           :height 600}))])))
 
 (defn recent-pages
   []
-  (let [pages (db/get-key-value :recent/pages)]
+  (let [pages (->> (db/get-key-value :recent/pages)
+                   (remove nil?)
+                   (remove #(= (string/lower-case %) "contents")))]
     [:div.recent-pages.text-sm.flex-col.flex.ml-3.mt-2
      (if (seq pages)
        (for [page pages]
@@ -64,7 +76,7 @@
                    :href     (rfe/href :page {:name page})
                    :on-click (fn [e]
                                (when (gobj/get e "shiftKey")
-                                 (when-let [page (db/pull [:page/name (string/lower-case page)])]
+                                 (when-let [page (db/pull [:block/name (string/lower-case page)])]
                                    (state/sidebar-add-block!
                                     (state/get-current-repo)
                                     (:db/id page)
@@ -76,20 +88,15 @@
 (rum/defc contents < rum/reactive db-mixins/query
   []
   [:div.contents.flex-col.flex.ml-3
-   (when-let [contents (db/entity [:page/name "contents"])]
+   (when-let [contents (db/entity [:block/name "contents"])]
      (page/contents-page contents))])
 
 (defn build-sidebar-item
   [repo idx db-id block-type block-data t]
   (case block-type
     :contents
-    [[:a {:on-click (fn [e]
-                      (util/stop e)
-                      (if-not (db/entity [:page/name "contents"])
-                        (page-handler/create! "contents")
-                        (route-handler/redirect! {:to          :page
-                                                  :path-params {:name "contents"}})))}
-      (t :right-side-bar/contents)]
+    [(or (state/get-favorites-name)
+         (t :right-side-bar/favorites))
      (contents)]
 
     :recent
@@ -99,8 +106,8 @@
     [(t :right-side-bar/help) (onboarding/help)]
 
     :page-graph
-    [(str (t :right-side-bar/graph-ref) (db-model/get-page-original-name block-data))
-     (page-graph block-data)]
+    [(str (t :right-side-bar/page-graph))
+     (page-graph)]
 
     :block-ref
     (when-let [block (db/entity repo [:block/uuid (:block/uuid (:block block-data))])]
@@ -124,7 +131,8 @@
           (block-cp repo idx block-data)]]))
 
     :page
-    (let [page-name (:page/name block-data)]
+    (let [page-name (or (:block/name block-data)
+                        db-id)]
       [[:a {:href     (rfe/href :page {:name page-name})
             :on-click (fn [e]
                         (when (gobj/get e "shiftKey")
@@ -134,14 +142,13 @@
         (page-cp repo page-name)]])
 
     :page-presentation
-    (let [page-name (get-in block-data [:page :page/name])
+    (let [page-name (get-in block-data [:page :block/name])
           journal? (:journal? block-data)
           blocks (db/get-page-blocks repo page-name)
           blocks (if journal?
                    (rest blocks)
                    blocks)
           sections (block/build-slide-sections blocks {:id          "slide-reveal-js"
-                                                       :start-level 2
                                                        :slide?      true
                                                        :sidebar?    true
                                                        :page-name   page-name})]
@@ -164,15 +171,17 @@
 
 (rum/defc sidebar-item < rum/reactive
   [repo idx db-id block-type block-data t]
+
   (let [item
         (if (= :page block-type)
-          (let [page (db/query-entity-in-component db-id)]
+          (let [lookup-ref (if (number? db-id) db-id [:block/name (string/lower-case db-id)])
+                page (db/query-entity-in-component lookup-ref)]
             (when (seq page)
               (build-sidebar-item repo idx db-id block-type page t)))
           (build-sidebar-item repo idx db-id block-type block-data t))]
     (when item
       (let [collapse? (state/sub [:ui/sidebar-collapsed-blocks db-id])]
-        [:div.sidebar-item.content.color-level
+        [:div.sidebar-item.content.color-level.px-4.shadow-lg
          (let [[title component] item]
            [:div.flex.flex-col
             [:div.flex.flex-row.justify-between
@@ -182,7 +191,7 @@
                (if collapse?
                  (svg/caret-right)
                  (svg/caret-down))]
-              [:div.ml-1
+              [:div.ml-1.font-medium
                title]]
              (close #(state/sidebar-remove-block! idx))]
             [:div {:class (if collapse? "hidden" "initial")}
@@ -200,7 +209,7 @@
 
                (date/journal-name))]
     (if page
-      (util/url-decode (string/lower-case page)))))
+      (string/lower-case page))))
 
 (defn get-current-page
   []
@@ -222,14 +231,15 @@
                  (fn [^js/MouseEvent e]
                    (let [width js/document.documentElement.clientWidth
                          offset (.-left (.-rect e))
-                         to-val (- 1 (.toFixed (/ offset width) 6))
-                         to-val (cond
-                                  (< to-val 0.2) 0.2
-                                  (> to-val 0.7) 0.7
-                                  :else to-val)]
-                     (.setProperty (.-style js/document.documentElement)
-                                   "--ls-right-sidebar-width"
-                                   (str (* to-val 100) "%"))))}}))
+                         right-el-ratio (- 1 (.toFixed (/ offset width) 6))
+                         right-el-ratio (cond
+                                          (< right-el-ratio 0.2) 0.2
+                                          (> right-el-ratio 0.7) 0.7
+                                          :else right-el-ratio)
+                         right-el (js/document.getElementById "right-sidebar")]
+                     (when right-el
+                       (let [width (str (* right-el-ratio 100) "%")]
+                         (.setProperty (.-style right-el) "width" width)))))}}))
              (.styleCursor false)
              (.on "dragstart" #(.. js/document.documentElement -classList (add "is-resizing-buf")))
              (.on "dragend" #(.. js/document.documentElement -classList (remove "is-resizing-buf")))))
@@ -249,17 +259,20 @@
         theme (state/sub :ui/theme)
         t (i18n/use-tongue)]
     (rum/with-context [[t] i18n/*tongue-context*]
-      [:div#right-sidebar.cp__right-sidebar
-       {:class (if sidebar-open? "is-open")}
+      [:div#right-sidebar.cp__right-sidebar.h-screen.scrollbar-spacing
+       {:class (if sidebar-open? "open" "closed")}
        (if sidebar-open?
-         [:div.cp__right-sidebar-inner
+         [:div.cp__right-sidebar-inner.flex.flex-col.h-full#right-sidebar-container
+
           (sidebar-resizer)
-          [:div.flex.flex-row.justify-between.items-center
+          [:div.cp__right-sidebar-scrollable
+           [:div.cp__right-sidebar-topbar.flex.flex-row.justify-between.items-center.px-4.h-12
            [:div.cp__right-sidebar-settings.hide-scrollbar {:key "right-sidebar-settings"}
             [:div.ml-4.text-sm
              [:a.cp__right-sidebar-settings-btn {:on-click (fn [e]
                                                              (state/sidebar-add-block! repo "contents" :contents nil))}
-              (t :right-side-bar/contents)]]
+              (or (state/get-favorites-name)
+                  (t :right-side-bar/favorites))]]
 
             [:div.ml-4.text-sm
              [:a.cp__right-sidebar-settings-btn {:on-click (fn [_e]
@@ -281,10 +294,14 @@
              [:a.cp__right-sidebar-settings-btn {:on-click (fn [_e]
                                                              (state/sidebar-add-block! repo "help" :help nil))}
               (t :right-side-bar/help)]]]
-           [:a.close-arrow.opacity-50.hover:opacity-100 {:on-click state/toggle-sidebar-open?!}
-            (svg/big-arrow-right)]]
 
-          (for [[idx [repo db-id block-type block-data]] (medley/indexed blocks)]
-            (rum/with-key
-              (sidebar-item repo idx db-id block-type block-data t)
-              (str "sidebar-block-" idx)))])])))
+           (when sidebar-open?
+             [:div.flex.align-items {:style {:z-index 999
+                                             :margin-right 2}}
+              (toggle)])]
+
+           [:.sidebar-item-list.flex-1
+            (for [[idx [repo db-id block-type block-data]] (medley/indexed blocks)]
+              (rum/with-key
+                (sidebar-item repo idx db-id block-type block-data t)
+                (str "sidebar-block-" idx)))]]])])))

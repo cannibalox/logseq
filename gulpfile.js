@@ -1,11 +1,9 @@
 const fs = require('fs')
+const utils = require('util')
 const cp = require('child_process')
+const exec = utils.promisify(cp.exec)
 const path = require('path')
 const gulp = require('gulp')
-const postcss = require('gulp-postcss')
-const concat = require('gulp-concat')
-const cached = require('gulp-cached')
-const remember = require('gulp-remember')
 const cleanCSS = require('gulp-clean-css')
 const del = require('del')
 
@@ -14,51 +12,26 @@ const resourcesPath = path.join(__dirname, 'resources')
 const sourcePath = path.join(__dirname, 'src/main/frontend')
 const resourceFilePath = path.join(resourcesPath, '**')
 
-const tailwindCoreEntry = path.join(__dirname, 'tailwind.css')
-const tailwindBuildEntry = path.join(sourcePath, '**/*.css')
-const tailwind = {
-  paths: [tailwindCoreEntry, tailwindBuildEntry],
-  outputDir: path.join(outputPath, 'css'),
-  outputName: 'tailwind.build.css',
-}
-
 const css = {
-  async watchCSS () {
-    // remove tailwind core css
-    await new Promise((resolve) => {
-      css._buildTailwind(
-        tailwind.paths.shift(),
-        'tailwind.core.css'
-      )
-        .on('end', resolve)
+  watchCSS () {
+    return cp.spawn(`yarn css:watch`, {
+      shell: true,
+      stdio: 'inherit'
     })
-
-    return gulp.watch(
-      tailwind.paths, { ignoreInitial: false },
-      css._buildTailwind.bind(null, void 0, void 0))
   },
 
   buildCSS (...params) {
     return gulp.series(
-      css._buildTailwind.bind(null, tailwindCoreEntry, 'tailwind.core.css'),
-      css._buildTailwind.bind(null, tailwindBuildEntry, 'tailwind.build.css'),
-      css._optimizeCSSForRelease)(...params)
-  },
-
-  _buildTailwind (entry, output) {
-    return gulp.src(entry || tailwind.paths)
-      .pipe(cached('postcss-' + entry))
-      .pipe(postcss())
-      .pipe(remember('postcss-' + entry))
-      .pipe(concat(output || tailwind.outputName))
-      .pipe(gulp.dest(tailwind.outputDir))
+      () => exec(`yarn css:build`, {}),
+      css._optimizeCSSForRelease
+    )(...params)
   },
 
   _optimizeCSSForRelease () {
     return gulp.src(path.join(outputPath, 'css', 'style.css'))
       .pipe(cleanCSS())
       .pipe(gulp.dest(path.join(outputPath, 'css')))
-  },
+  }
 }
 
 const common = {
@@ -71,7 +44,7 @@ const common = {
   },
 
   keepSyncResourceFile () {
-    return gulp.watch(resourceFilePath, { ignoreInitial: false }, common.syncResourceFile)
+    return gulp.watch(resourceFilePath, { ignoreInitial: true }, common.syncResourceFile)
   }
 }
 
@@ -90,7 +63,7 @@ exports.electron = () => {
 }
 
 exports.electronMaker = async () => {
-  cp.execSync('yarn cljs:electron-release', {
+  cp.execSync('yarn cljs:release', {
     stdio: 'inherit'
   })
 
@@ -113,6 +86,11 @@ exports.electronMaker = async () => {
     })
   }
 
+  cp.execSync('yarn rebuild:better-sqlite3', {
+    cwd: outputPath,
+    stdio: 'inherit'
+  })
+
   cp.execSync('yarn electron:make', {
     cwd: outputPath,
     stdio: 'inherit'
@@ -120,5 +98,5 @@ exports.electronMaker = async () => {
 }
 
 exports.clean = common.clean
-exports.watch = gulp.parallel(common.keepSyncResourceFile, css.watchCSS)
+exports.watch = gulp.series(common.syncResourceFile, gulp.parallel(common.keepSyncResourceFile, css.watchCSS))
 exports.build = gulp.series(common.clean, common.syncResourceFile, css.buildCSS)

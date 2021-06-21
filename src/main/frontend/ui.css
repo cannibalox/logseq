@@ -1,6 +1,5 @@
 #ui__ac {
   &-inner {
-    max-height: 400px;
     overflow-x: hidden;
     overflow-y: auto;
     position: relative;
@@ -10,6 +9,15 @@
       padding: 6px 8px;
     }
   }
+}
+
+.ui__ac-group-name {
+  @apply p-2 text-xs;
+  color: var(--ls-block-ref-link-text-color);
+}
+
+.search-all #ui__ac-inner {
+  max-height: none;
 }
 
 .ui__notifications {
@@ -32,7 +40,7 @@
 
 .ui__toggle {
   .wrapper {
-    @apply relative inline-block flex-shrink-0
+    @apply relative flex-shrink-0
     h-6 w-11 border-2 border-transparent flex
     rounded-full cursor-pointer focus:outline-none focus:shadow-outline;
   }
@@ -53,9 +61,13 @@
 }
 
 .ui__modal {
-  @apply fixed bottom-0 inset-x-0
-  sm:inset-0 sm:flex sm:items-center sm:justify-center
-  px-4 pb-4;
+  @apply fixed bottom-0 inset-x-0 px-4 pb-4;
+
+  @screen sm {
+    & {
+      @apply inset-0 flex items-center justify-center;
+    }
+  }
 
   &-overlay {
     @apply fixed inset-0 transition-opacity;
@@ -66,7 +78,17 @@
   }
 
   &-panel {
-    @apply relative bg-white rounded-md p-8 shadow-xl;
+    @apply relative rounded-md shadow-xl;
+
+    overflow: hidden;
+    background: var(--ls-secondary-background-color);
+
+    .panel-content {
+      overflow-y: auto;
+      max-height: 80vh;
+      max-width: 768px;
+      padding: 2rem;
+    }
   }
 
   &-close {
@@ -83,7 +105,7 @@
     align-items: center;
     font-size: 14px;
 
-    input[type=checkbox] {
+    input[type='checkbox'] {
       margin-right: 8px;
     }
   }
@@ -95,7 +117,7 @@
   focus:outline-none transition ease-in-out duration-150 mt-1;
 
   &:disabled {
-    opacity: .5;
+    opacity: 0.5;
   }
 
   &.is-link {
@@ -124,7 +146,7 @@
   width: 0;
   height: 0;
   vertical-align: middle;
-  content: "";
+  content: '';
   border-top-style: solid;
   border-top-width: 4px;
   border-right: 4px solid transparent;

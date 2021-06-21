@@ -22,8 +22,9 @@
             [frontend.handler.editor :as editor-handler]
             [frontend.handler.route :as route-handler]
             [frontend.handler.export :as export]
+            [frontend.handler.repo :as repo-handler]
+            [frontend.handler.web.nfs :as nfs-handler]
             [frontend.config :as config]
-            [frontend.keyboards :as keyboards]
             [dommy.core :as d]
             [clojure.string :as string]
             [goog.object :as gobj]
@@ -100,46 +101,63 @@
            :stroke-linejoin "round"
            :stroke-linecap "round"}]]]])
     [:div.flex-shrink-0.flex.items-center.px-4.h-16.head-wrap
-     (repo/repos-dropdown false nil)]
+     (repo/repos-dropdown nil)]
     [:div.flex-1.h-0.overflow-y-auto
      (sidebar-nav route-match close-fn)]]])
 
-(rum/defc sidebar-main
+(rum/defc main
   [{:keys [route-match global-graph-pages? logged? home? route-name indexeddb-support? white? db-restoring? main-content]}]
-  (rum/with-context [[t] i18n/*tongue-context*]
-    [:div#main-content.cp__sidebar-main-layout
-     [:div#sidebar-nav-wrapper.flex-col.pt-4.hidden.sm:block
-      {:style {:flex (if (state/get-left-sidebar-open?)
-                       "0 1 20%"
-                       "0 0 0px")
-               :border-right (str "1px solid "
-                                  (if white? "#f0f8ff" "#073642"))}}
-      (when (state/sub :ui/left-sidebar-open?)
-        (sidebar-nav route-match nil))]
-     [:div#main-content-container.cp__sidebar-main-content-container
-      [:div.cp__sidebar-main-content
-       {:data-is-global-graph-pages global-graph-pages?
-        :data-is-full-width (or global-graph-pages?
-                                (contains? #{:all-files :all-pages :my-publishing} route-name))}
-       (cond
-         (not indexeddb-support?)
-         nil
+  (ui/catch-error
+   [:div#main-content-container.w-full.flex.justify-center
+    [:div.mt-8
+     [:span.error "⚠️ Oops, Something Went Wrong, please back up your data first!"]
+     [:div.my-2 "Usually, a re-index could fix it. If it doesn't, you can join our "
+      [:a.inline {:href "https://discord.gg/KpN4eHY"
+                  :target "_blank"}
+       "discord group"]
+      " to ask for help."]
+     (ui/button "Re-index current graph"
+       :on-click #(repo-handler/re-index! nfs-handler/rebuild-index!))]]
+   (rum/with-context [[t] i18n/*tongue-context*]
+     [:div#main-content.cp__sidebar-main-layout.flex-1.flex
+      [:div#sidebar-nav-wrapper.flex-col.pt-4.hidden.sm:block
+       {:style {:flex (if (state/get-left-sidebar-open?)
+                        "0 1 20%"
+                        "0 0 0px")
+                :border-right (str "1px solid "
+                                   (if white? "#f0f8ff" "#073642"))}}
+       (when (state/sub :ui/left-sidebar-open?)
+         (sidebar-nav route-match nil))]
+      [:div#main-content-container.w-full.flex.justify-center
+       {:style {:margin-top (if global-graph-pages? 0 "2rem")}}
+       [:div.cp__sidebar-main-content
+        {:data-is-global-graph-pages global-graph-pages?
+         :data-is-full-width (or global-graph-pages?
+                                 (contains? #{:all-files :all-pages :my-publishing} route-name))}
+        (cond
+          (not indexeddb-support?)
+          nil
 
-         db-restoring?
-         [:div.mt-20
-          [:div.ls-center
-           (ui/loading (t :loading))]]
+          db-restoring?
+          [:div.mt-20
+           [:div.ls-center
+            (ui/loading (t :loading))]]
 
-         :else
-         [:div {:style {:margin-bottom (if global-graph-pages? 0 120)}}
-          main-content])]]
-     (right-sidebar/sidebar)]))
+          :else
+          [:div.pb-24 {:class (if global-graph-pages? "" (util/hiccup->class "max-w-7xl.mx-auto"))
+                       :style {:margin-bottom (if global-graph-pages? 0 120)}}
+           main-content])]]])))
+
+(rum/defc footer
+  []
+  (when-let [user-footer (and config/publishing? (get-in (state/get-config) [:publish-common-footer]))]
+    [:div.p-6 user-footer]))
 
 (defn get-default-home-if-valid
   []
   (when-let [default-home (state/get-default-home)]
     (when-let [page (:page default-home)]
-      (when (db/entity [:page/name (string/lower-case page)])
+      (when (db/entity [:block/name (string/lower-case page)])
         default-home))))
 
 (defonce sidebar-inited? (atom false))
@@ -176,13 +194,18 @@
         preferred-format (state/sub [:me :preferred_format])
         logged? (:name me)]
     (rum/with-context [[t] i18n/*tongue-context*]
-      [:div.max-w-7xl.mx-auto
+      [:div
        (cond
          (and default-home
               (= :home (state/get-current-route))
               (not (state/route-has-p?)))
          (route-handler/redirect! {:to :page
                                    :path-params {:name (:page default-home)}})
+
+         (and config/publishing?
+              (not default-home)
+              (empty? latest-journals))
+         (route-handler/redirect! {:to :all-pages})
 
          importing-to-db?
          (ui/loading (t :parsing-files))
@@ -223,11 +246,11 @@
                   :exit 300}}
        links
        ;; (custom-context-menu-content)
-))))
+       ))))
 
 (rum/defc new-block-mode < rum/reactive
   []
-  (when-let [alt-enter? (= "alt+enter" (state/sub [:shortcuts :editor/new-block]))]
+  (when (state/sub [:editor/new-block-toggle?])
     [:a.px-1.text-sm.font-medium.bg-base-2.mr-4.rounded-md
      {:title "Click to switch to \"Enter\" for creating new block"
       :on-click state/toggle-new-block-shortcut!}
@@ -262,40 +285,13 @@
 (rum/defcs sidebar <
   (mixins/modal :modal/show?)
   rum/reactive
-  ;; TODO: move this to keyboards
   (mixins/event-mixin
    (fn [state]
      (mixins/listen state js/window "click"
                     (fn [e]
                       ;; hide context menu
                       (state/hide-custom-context-menu!)
-
-                      (if-not (state/get-selection-start-block)
-                        (editor-handler/clear-selection! e)
-                        (state/set-selection-start-block! nil))))
-
-     ;; TODO: move to keyboards
-     (mixins/on-key-down
-      state
-      {;; esc
-       27 (fn [_state e]
-            (editor-handler/clear-selection! e))
-
-       ;; shift+up
-       38 (fn [state e]
-            (editor-handler/on-select-block state e true))
-
-       ;; shift+down
-       40 (fn [state e]
-            (editor-handler/on-select-block state e false))
-
-       ;; ?
-       191 (fn [state e]
-             (when-not (util/input? (gobj/get e "target"))
-               (state/sidebar-add-block! (state/get-current-repo) "help" :help nil)))})))
-  {:did-mount (fn [state]
-                (keyboards/bind-shortcuts!)
-                state)}
+                      (editor-handler/clear-selection! e)))))
   [state route-match main-content]
   (let [{:keys [open? close-fn open-fn]} state
         close-fn (fn []
@@ -305,6 +301,7 @@
         current-repo (state/sub :git/current-repo)
         granted? (state/sub [:nfs/user-granted? (state/get-current-repo)])
         theme (state/sub :ui/theme)
+        system-theme? (state/sub :ui/system-theme?)
         white? (= "white" (state/sub :ui/theme))
         settings-open? (state/sub :ui/settings-open?)
         sidebar-open?  (state/sub :ui/sidebar-open?)
@@ -320,37 +317,45 @@
       (theme/container
        {:theme         theme
         :route         route-match
+        :current-repo  current-repo
         :nfs-granted?  granted?
         :db-restoring? db-restoring?
-        :on-click      editor-handler/unhighlight-block!}
+        :sidebar-open? sidebar-open?
+        :system-theme? system-theme?
+        :on-click      #(do
+                          (editor-handler/unhighlight-blocks!)
+                          (util/fix-open-external-with-shift! %))}
 
        [:div.theme-inner
         (sidebar-mobile-sidebar
          {:open?       open?
           :close-fn    close-fn
           :route-match route-match})
-        [:div.#app-container.cp__sidebar-layout
-         {:class (if sidebar-open? "is-right-sidebar-open")
-          :style {:padding-bottom (if global-graph-pages? 0 30)}}
-         (header/header {:open-fn        open-fn
-                         :white?         white?
-                         :current-repo   current-repo
-                         :logged?        logged?
-                         :page?          page?
-                         :route-match    route-match
-                         :me             me
-                         :default-home   default-home
-                         :new-block-mode new-block-mode})
+        [:div.#app-container.h-screen.flex
+         [:div.flex-1.h-full.w-full.flex.flex-col#left-container.relative
+          [:div.scrollbar-spacing#main-container
+           (header/header {:open-fn        open-fn
+                           :white?         white?
+                           :current-repo   current-repo
+                           :logged?        logged?
+                           :page?          page?
+                           :route-match    route-match
+                           :me             me
+                           :default-home   default-home
+                           :new-block-mode new-block-mode})
 
-         (sidebar-main {:route-match         route-match
-                        :global-graph-pages? global-graph-pages?
-                        :logged?             logged?
-                        :home?               home?
-                        :route-name          route-name
-                        :indexeddb-support?  indexeddb-support?
-                        :white?              white?
-                        :db-restoring?       db-restoring?
-                        :main-content        main-content})]
+           (main {:route-match         route-match
+                  :global-graph-pages? global-graph-pages?
+                  :logged?             logged?
+                  :home?               home?
+                  :route-name          route-name
+                  :indexeddb-support?  indexeddb-support?
+                  :white?              white?
+                  :db-restoring?       db-restoring?
+                  :main-content        main-content})
+
+           (footer)]]
+         (right-sidebar/sidebar)]
 
         (ui/notification)
         (ui/modal)
@@ -367,4 +372,4 @@
          ;;   :on-click (fn []
          ;;               (state/set-left-sidebar-open! (not (state/get-left-sidebar-open?))))}
          ;;  (if (state/sub :ui/left-sidebar-open?) "<" ">")]
-)]))))
+          )]))))

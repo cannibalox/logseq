@@ -2,7 +2,8 @@
   (:require [clojure.set :as set]
             [clojure.string :as string]
             [frontend.state :as state]
-            [frontend.util :as util]))
+            [frontend.util :as util]
+            [shadow.resource :as rc]))
 
 (goog-define DEV-RELEASE false)
 (defonce dev-release? DEV-RELEASE)
@@ -10,6 +11,8 @@
 
 (goog-define PUBLISHING false)
 (defonce publishing? PUBLISHING)
+
+(def test? false)
 
 ;; :TODO: How to do this?
 ;; (defonce desktop? ^boolean goog.DESKTOP)
@@ -28,10 +31,17 @@
 (def asset-domain (util/format "https://asset.%s.com"
                                app-name))
 
+;; TODO: Remove this, switch to lazy loader
 (defn asset-uri
   [path]
-  (if (util/file-protocol?)
+  (cond
+    publishing?
+    path
+
+    (util/file-protocol?)
     (string/replace path "/static/" "./")
+
+    :else
     (if dev? path
         (str asset-domain path))))
 
@@ -62,7 +72,7 @@
        :excalidraw})))
 
 (def markup-formats
-  #{:org :md :markdown :asciidoc :rst})
+  #{:org :md :markdown :asciidoc :adoc :rst})
 
 (defn img-formats
   []
@@ -91,7 +101,7 @@
 
 (def mobile?
   (when-not util/node-test?
-    (re-find #"Mobi" js/navigator.userAgent)))
+    (util/safe-re-find #"Mobi" js/navigator.userAgent)))
 
 ;; TODO: protocol design for future formats support
 
@@ -102,10 +112,8 @@
     (case format
       :org
       "*"
-      :markdown
-      "#"
 
-      "")))
+      "-")))
 
 (defn get-hr
   [format]
@@ -265,9 +273,17 @@
   []
   (or (state/get-pages-directory) default-pages-directory))
 
+(defn get-journals-directory
+  []
+  (or (state/get-journals-directory) default-journals-directory))
+
 (defn draw?
   [path]
   (util/starts-with? path default-draw-directory))
+
+(defn journal?
+  [path]
+  (string/includes? path (str (get-journals-directory) "/")))
 
 (defonce local-repo "local")
 (defonce local-assets-dir "assets")
@@ -275,8 +291,7 @@
 (def custom-css-file "custom.css")
 (def metadata-file "metadata.edn")
 
-(def config-default-content
-  "{:project {\n           ;; Selected public notes can be published to https://logseq.com/your-project-or-your-username.\n           :name \"\"\n           :alias \"\"\n           ;; your twitter handle\n           :twitter \"\"\n           ;; description supports both hiccup and html\n           :description \"\"}\n\n ;; Currently, we support either \"Markdown\" or \"Org\".\n ;; This can overwrite your global preference so that\n ;; maybe your personal preferred format is Org but you'd\n ;; need to use Markdown for some projects.\n ;; :preferred-format \"\"\n\n ;; Git settings\n :git-pull-secs 60\n :git-push-secs 10\n :git-auto-push true\n\n ;; The app will ignore those directories or files.\n ;; E.g. \"/archived\" \"/test.md\"\n :hidden []\n\n ;; When creating the new journal page, the app will use your template content here.\n ;; Example for Markdown users: \"## [[Work]]\\n###\\n## [[Family]]\\n###\\n\n ;; Example for Org mode users: \"** [[Work]]\\n***\\n** [[Family]]\\n***\\n\n :default-templates\n {:journals \"\"}\n\n ;; The app will show those queries in today's journal page,\n ;; the \"NOW\" query asks the tasks which need to be finished \"now\",\n ;; the \"NEXT\" query asks the future tasks.\n :default-queries\n {:journals\n  [{:title \"🔨 NOW\"\n    :query [:find (pull ?h [*])\n            :in $ ?start ?today\n            :where\n            [?h :block/marker ?marker]\n            [?h :block/page ?p]\n            [?p :page/journal? true]\n            [?p :page/journal-day ?d]\n            [(>= ?d ?start)]\n            [(<= ?d ?today)]\n            [(contains? #{\"NOW\" \"DOING\"} ?marker)]]\n    :inputs [:14d :today]\n    :result-transform (fn [result]\n                        (sort-by (fn [h]\n                                   (get h :block/priority \"Z\")) result))\n    :collapsed? false}\n   {:title \"📅 NEXT\"\n    :query [:find (pull ?h [*])\n            :in $ ?start ?next\n            :where\n            [?h :block/marker ?marker]\n            [?h :block/ref-pages ?p]\n            [?p :page/journal? true]\n            [?p :page/journal-day ?d]\n            [(> ?d ?start)]\n            [(< ?d ?next)]\n            [(contains? #{\"NOW\" \"LATER\" \"TODO\"} ?marker)]]\n    :inputs [:today :7d-after]\n    :collapsed? false}]}\n\n ;; Add your own commands to speedup.\n ;; E.g. [[\"js\" \"Javascript\"]]\n :commands\n []\n\n ;; Macros replace texts and will make you more productive.\n ;; For example:\n ;; Add this to the macros below:\n ;; {\"poem\" \"Rose is $1, violet's $2. Life's ordered: Org assists you.\"}\n ;; input \"{{{poem(red,blue)}}}\"\n ;; becomes\n ;; Rose is red, violet's blue. Life's ordered: Org assists you.\n :macros {}}\n")
+(def config-default-content (rc/inline "config.edn"))
 
 (def markers
   #{"now" "later" "todo" "doing" "done" "wait" "waiting"
@@ -294,7 +309,7 @@
 
 (defn local-asset?
   [s]
-  (re-find (re-pattern (str "^[./]*" local-assets-dir)) s))
+  (util/safe-re-find (re-pattern (str "^[./]*" local-assets-dir)) s))
 
 (defn get-local-asset-absolute-path
   [s]
@@ -320,7 +335,7 @@
   [repo-url path]
   (if (and (util/electron?) (local-db? repo-url))
     path
-    (str (get-repo-dir repo-url) "/" path)))
+    (util/node-path.join (get-repo-dir repo-url) path)))
 
 (defn get-file-path
   [repo-url relative-path]

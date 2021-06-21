@@ -11,15 +11,17 @@
             [frontend.context.i18n :as i18n]
             [frontend.handler.ui :as ui-handler]
             [frontend.handler.user :as user-handler]
-            [frontend.handler.export :as export]
             [frontend.components.svg :as svg]
             [frontend.components.repo :as repo]
             [frontend.components.search :as search]
-            [frontend.handler.project :as project-handler]
+            [frontend.components.export :as export]
+            [frontend.components.plugins :as plugins]
+            [frontend.components.right-sidebar :as sidebar]
             [frontend.handler.page :as page-handler]
             [frontend.handler.web.nfs :as nfs]
             [goog.dom :as gdom]
-            [goog.object :as gobj]))
+            [goog.object :as gobj]
+            [frontend.handler.migrate :as migrate]))
 
 (rum/defc logo < rum/reactive
   [{:keys [white?]}]
@@ -27,7 +29,7 @@
    {:href     (rfe/href :home)
     :on-click (fn []
                 (util/scroll-to-top)
-                (state/set-journals-length! 1))}
+                (state/set-journals-length! 2))}
    (if-let [logo (and config/publishing?
                       (get-in (state/get-config) [:project :logo]))]
      [:img.cp__header-logo-img {:src logo}]
@@ -71,6 +73,7 @@
 (rum/defc dropdown-menu < rum/reactive
   [{:keys [me current-repo t default-home]}]
   (let [projects (state/sub [:me :projects])
+        developer-mode? (state/sub [:ui/developer-mode?])
         logged? (state/logged?)]
     (ui/dropdown-with-links
      (fn [{:keys [toggle-fn]}]
@@ -79,7 +82,7 @@
         (svg/horizontal-dots nil)])
      (->>
       [(when-not (util/mobile?)
-         {:title (t :help/toggle-right-sidebar)
+         {:title (t :shortcut.ui/toggle-right-sidebar)
           :options {:on-click state/toggle-sidebar-open?!}})
 
        (when current-repo
@@ -87,17 +90,12 @@
           :options {:href (rfe/href :graph)}
           :icon svg/graph-sm})
 
-       (when (or logged? (and (nfs/supported?) current-repo))
-         {:title (t :all-graphs)
-          :options {:href (rfe/href :repos)}
-          :icon svg/repos-sm})
-
        (when current-repo
          {:title (t :all-pages)
           :options {:href (rfe/href :all-pages)}
           :icon svg/pages-sm})
 
-       (when current-repo
+       (when (and current-repo (not config/publishing?))
          {:title (t :all-files)
           :options {:href (rfe/href :all-files)}
           :icon svg/folder-sm})
@@ -107,32 +105,34 @@
           :options {:href (rfe/href :all-journals)}
           :icon svg/calendar-sm})
 
-       (when (project-handler/get-current-project current-repo projects)
-         {:title (t :my-publishing)
-          :options {:href (rfe/href :my-publishing)}})
+       {:title (t :settings)
+        :options {:on-click #(ui-handler/toggle-settings-modal!)}
+        :icon svg/settings-sm}
 
-       (when-let [project (and current-repo
-                               (project-handler/get-current-project current-repo projects))]
-         (let [link (str config/website "/" project)]
-           {:title (str (t :go-to) "/" project)
-            :options {:href link
-                      :target "_blank"}
-            :icon svg/external-link}))
+       (when developer-mode?
+         {:title (t :plugins)
+          :options {:href (rfe/href :plugins)}})
 
-       (when current-repo
-         {:title (t :settings)
-          :options {:on-click #(ui-handler/toggle-settings-modal!)}
-          :icon svg/settings-sm})
+       (when developer-mode?
+         {:title (t :themes)
+          :options {:on-click #(plugins/open-select-theme!)}})
 
        (when current-repo
          {:title (t :export)
-          :options {:on-click (fn []
-                                (export/export-repo-as-html! current-repo))}
+          :options {:on-click #(state/set-modal! export/export)}
           :icon nil})
+
        (when current-repo
          {:title (t :import)
           :options {:href (rfe/href :import)}
           :icon svg/import-sm})
+
+       (when (and current-repo
+                  (not (:markdown/version (state/get-config))))
+         {:title "Convert to more standard Markdown"
+          :options {:on-click (fn [] (migrate/show-convert-notification! current-repo))}
+          :icon svg/import-sm})
+
        {:title [:div.flex-row.flex.justify-between.items-center
                 [:span (t :join-community)]]
         :options {:href "https://discord.gg/KpN4eHY"
@@ -146,7 +146,7 @@
       (remove nil?))
      ;; {:links-footer (when (and (util/electron?) (not logged?))
      ;;                  [:div.px-2.py-2 (login logged?)])}
-)))
+     )))
 
 (rum/defc header
   < rum/reactive
@@ -159,8 +159,7 @@
        {:on-double-click (fn [^js e]
                            (when-let [target (.-target e)]
                              (when (and (util/electron?)
-                                        (or (.. target -classList (contains "cp__header"))
-                                            (. target (closest "#search"))))
+                                        (or (.. target -classList (contains "cp__header"))))
                                (js/window.apis.toggleMaxOrMinActiveWindow))))}
        (left-menu-button {:on-click (fn []
                                       (open-fn)
@@ -169,12 +168,12 @@
        (logo {:white? white?})
 
        (when (util/electron?)
-         [:a.mr-1.opacity-30.hover:opacity-100.it.navigation
+         [:a.mr-1.opacity-60.hover:opacity-100.it.navigation
           {:style {:margin-left -10}
            :title "Go Back" :on-click #(js/window.history.back)} (svg/arrow-left)])
 
        (when (util/electron?)
-         [:a.opacity-30.hover:opacity-100.it.navigation
+         [:a.opacity-60.hover:opacity-100.it.navigation
           {:style {:margin-right 15}
            :title "Go Forward" :on-click #(js/window.history.forward)} (svg/arrow-right)])
 
@@ -189,8 +188,8 @@
 
        (repo/sync-status current-repo)
 
-       [:div.repos.hidden.md:block
-        (repo/repos-dropdown true nil)]
+       [:div.repos
+        (repo/repos-dropdown nil)]
 
        (when (and (nfs/supported?) (empty? repos)
                   (not config/publishing?))
@@ -211,6 +210,4 @@
                        :t t
                        :current-repo current-repo
                        :default-home default-home})
-
-       [:a#download-as-html.hidden]
-       [:a#download-as-zip.hidden]])))
+       (when (not (state/sub :ui/sidebar-open?)) (sidebar/toggle))])))

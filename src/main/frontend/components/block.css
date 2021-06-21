@@ -1,11 +1,17 @@
 .blocks-container {
 }
 
+.block-content-wrapper {
+  width: 100%;
+}
+
 .block-content {
   min-height: 24px;
   max-width: 100%;
   overflow: initial;
   cursor: text;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
   word-break: break-word;
 
   img {
@@ -73,16 +79,23 @@
   }
 
   .resize {
-    display: flex;
+    display: inline-flex;
+    /* Fix chrome missing resize handle issue https://bugs.chromium.org/p/chromium/issues/detail?id=1135676&q=css%20resize%20type%3DBug&can=2.*/
+    transform: translate3d(0, 0, 0);
+  }
+
+  .draw [aria-labelledby="shapes-title"] {
+    position: absolute;
+    left: 50%;
+    transform: translate(-50%);
   }
 }
 
 .open-block-ref-link {
-  @apply py-0 px-1 rounded opacity-50 hover:opacity-100;
-  font-size: 12px;
-  line-height: 1em;
-  position: relative;
-  right: -4px;
+  @apply opacity-30 hover:opacity-100;
+  background-color: var(--ls-page-properties-background-color);
+  padding: 1px 4px;
+  border-radius: 2px;
 }
 
 .block-body {
@@ -90,6 +103,25 @@
   pre:first-child {
     margin-top: 8px;
     margin-bottom: 8px;
+  }
+}
+
+.block-body ul, .block-body ol, .block-body dl {
+    margin-bottom: 2em;
+
+    > li {
+      margin: 0;
+    }
+}
+
+.block-body ol {
+  list-style-position: inside;
+  margin-left: 0;
+
+  > li {
+    &::marker, > p {
+      display: inline-block;
+    }
   }
 }
 
@@ -123,10 +155,6 @@
   border-bottom-color: var(--ls-block-ref-link-text-color);
   cursor: alias;
 
-  &-wrap {
-    display: inline-block;
-  }
-
   &:hover {
     color: var(--ls-link-text-hover-color)
   }
@@ -152,27 +180,25 @@
   }
 }
 
-.blocks-properties {
+.block-properties {
+  margin: 4px 0;
+  padding: 4px 8px;
   background-color: var(--ls-block-properties-background-color, #f0f8ff);
 }
 
-.marker-switch {
-  font-size: 85%;
-  margin-right: 6px;
-  margin-left: 2px;
-  border-radius: 3px;
-  font-weight: 500;
-  display: inline-block;
-  text-align: center;
-  width: 16px;
-  height: 18px;
-  opacity: 0.5;
-  padding: 0 2px 0 2px;
-  border: 1px solid;
-  line-height: 1.3;
-  color: var(--ls-link-text-color, #045591);
-  cursor: pointer;
+.page-properties {
+    background-color: var(--ls-page-properties-background-color);
+}
 
+.block-marker {
+  padding: 2px 4px;
+  opacity: 0.5;
+  font-size: 85%;
+  margin: 0 2px 0 0px;
+  font-weight: 600;
+}
+
+.marker-switch {
   &:hover {
     color: var(--ls-link-text-hover-color);
     opacity: 1;
@@ -305,15 +331,13 @@
     transition: transform .2s;
   }
 
-  &:hover {
-    .bullet {
-      transform: scale(1.2);
-    }
-  }
-
   &.bullet-closed {
     background-color: var(--ls-block-bullet-border-color, #ced9e0);
   }
+}
+
+a:hover > .bullet-container .bullet {
+  transform: scale(1.2);
 }
 
 .doc-mode {
@@ -357,4 +381,8 @@
 
 .embed-header {
   font-weight: 600;
+}
+
+a.filter svg {
+    transform: scale(0.9);
 }

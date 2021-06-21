@@ -13,9 +13,15 @@ A local-first, non-linear, outliner notebook for organizing and sharing your per
 
 Use it to organize your todo list, to write your journals, or to record your unique life.
 
+<a href="https://www.producthunt.com/posts/logseq?utm_source=badge-review&utm_medium=badge&utm_souce=badge-logseq#discussion-body" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/review.svg?post_id=298158&theme=light" alt="Logseq - Your joyful, private digital garden | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
+
+## [Download our free Desktop app](https://github.com/logseq/logseq/releases)
+[Sponsor our contributors on Open Collective](https://opencollective.com/logseq), Logseq will move to Stripe later!
+
 ## Why Logseq?
 
-[Logseq](https://logseq.com) is a platform for knowledge sharing and management. It focuses on privacy, longevity, and user control.
+[Logseq](https://logseq.com) is a platform for knowledge management and collaboration. It focuses on privacy, longevity, and [user control](https://www.gnu.org/philosophy/free-sw.en.html).
+
 Notice: the backend code will be open-sourced as soon as we’re sure that the backend service meets the security standards.
 
 The server will never store or analyze your private notes. Your data are plain text files and we currently support both Markdown and Emacs Org mode (more to be added soon).
@@ -23,6 +29,16 @@ The server will never store or analyze your private notes. Your data are plain t
 In the unlikely event that the website is down or cannot be maintained, your data is, and will always be yours.
 
 ![Image of logseq](https://cdn.logseq.com/%2F8b9a461d-437e-4ca5-a2da-18b51077b5142020_07_25_Screenshot%202020-07-25%2013-29-49%20%2B0800.png?Expires=4749255017&Signature=Qbx6jkgAytqm6nLxVXQQW1igfcf~umV1OcG6jXUt09TOVhgXyA2Z5jHJ3AGJASNcphs31pZf4CjFQ5mRCyVKw6N8wb8Nn-MxuTJl0iI8o-jLIAIs9q1v-2cusCvuFfXH7bq6ir8Lpf0KYAprzuZ00FENin3dn6RBW35ENQwUioEr5Ghl7YOCr8bKew3jPV~OyL67MttT3wJig1j3IC8lxDDT8Ov5IMG2GWcHERSy00F3mp3tJtzGE17-OUILdeuTFz6d-NDFAmzB8BebiurYz0Bxa4tkcdLUpD5ToFHU08jKzZExoEUY8tvaZ1-t7djmo3d~BAXDtlEhC2L1YC2aVQ__&Key-Pair-Id=APKAJE5CCD6X7MP6PTEA)
+
+## Sponsors
+
+Our top sponsors are shown below! [[Become a sponsor](https://opencollective.com/logseq#sponsor)]
+
+<a href="https://www.deta.sh/" target="_blank"><img width=200 height=100 src="https://uploads-ssl.webflow.com/5eb96efa78dc680fc15be3be/5ebd24f6cbf6e9ebd674656e_Logo.svg" /></a>
+
+
+## Plugins documentation (Draft)
+The plugins documentation is at https://logseq.github.io/plugins. Any feedback would be greatly appreciated!
 
 ## Feature requests
 
@@ -58,12 +74,15 @@ Logseq is also made possible by the following projects:
 
 - Our blog: https://logseq.com/blog - Please be sure to visit our [About page](https://logseq.com/blog/about) for the latest updates of the app
 - Twitter: https://twitter.com/logseq
-- Discord: https://discord.gg/KpN4eHY - Where we answer questions, disucss workflows and share tips
+- Discord: https://discord.gg/KpN4eHY - Where we answer questions, discuss workflows and share tips
+- 中文 Discord：https://discord.gg/xYqcrXWymg
 - Github: https://github.com/logseq/logseq - everyone is encouraged to report issues!
 
 ---
 
 The following is for developers and designers who want to build and run Logseq locally and contribute to this project.
+
+We also have [a dedicated page](https://github.com/logseq/logseq/blob/master/CODEBASE_OVERVIEW.md) for LogSeq's codebase overview.
 
 ## Set up development environment
 
@@ -76,6 +95,7 @@ The following is for developers and designers who want to build and run Logseq l
 
 ```bash
 git clone https://github.com/logseq/logseq
+cd logseq
 yarn
 yarn watch
 ```

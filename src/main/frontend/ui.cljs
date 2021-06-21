@@ -4,9 +4,11 @@
             ["react-transition-group" :refer [TransitionGroup CSSTransition]]
             ["react-textarea-autosize" :as TextareaAutosize]
             ["react-resize-context" :as Resize]
+            ["react-tippy" :as react-tippy]
             [frontend.util :as util]
             [frontend.mixins :as mixins]
             [frontend.handler.notification :as notification-handler]
+            [frontend.handler.ui :as ui-handler]
             [frontend.state :as state]
             [frontend.components.svg :as svg]
             [clojure.string :as string]
@@ -14,13 +16,16 @@
             [goog.dom :as gdom]
             [medley.core :as medley]
             [frontend.ui.date-picker]
-            [frontend.context.i18n :as i18n]))
+            [frontend.context.i18n :as i18n]
+            [frontend.modules.shortcut.core :as shortcut]
+            [lambdaisland.glogi :as log]))
 
 (defonce transition-group (r/adapt-class TransitionGroup))
 (defonce css-transition (r/adapt-class CSSTransition))
 (defonce textarea (r/adapt-class (gobj/get TextareaAutosize "default")))
 (def resize-provider (r/adapt-class (gobj/get Resize "ResizeProvider")))
 (def resize-consumer (r/adapt-class (gobj/get Resize "ResizeConsumer")))
+(def Tippy (r/adapt-class (gobj/get react-tippy "Tooltip")))
 
 (rum/defc ls-textarea < rum/reactive
   [{:keys [on-change] :as props}]
@@ -85,7 +90,7 @@
    (fn [{:keys [close-fn] :as state}]
      [:div.py-1.rounded-md.shadow-xs
       (when links-header links-header)
-      (for [{:keys [options title icon]} links]
+      (for [{:keys [options title icon]} (if (fn? links) (links) links)]
         (let [new-options
               (assoc options
                      :on-click (fn [e]
@@ -97,7 +102,7 @@
                      [:div {:style {:margin-right "8px"}} title]
                       ;; [:div {:style {:position "absolute" :right "8px"}}
                       ;;  icon]
-]]
+                     ]]
           (rum/with-key
             (menu-link new-options child)
             title)))
@@ -105,7 +110,7 @@
    opts))
 
 (defn button
-  [text & {:keys [background href class intent]
+  [text & {:keys [background href class intent on-click]
            :as   option}]
   (let [klass (if-not intent ".bg-indigo-600.hover:bg-indigo-700.focus:border-indigo-700.active:bg-indigo-700")
         klass (if background (string/replace klass "indigo" background) klass)]
@@ -114,13 +119,13 @@
        (merge
         {:type  "button"
          :class (str (util/hiccup->class klass) " " class)}
-        (dissoc option :background))
+        (dissoc option :background :class))
        text]
       [:button.ui__button
        (merge
         {:type  "button"
          :class (str (util/hiccup->class klass) " " class)}
-        (dissoc option :background))
+        (dissoc option :background :class))
        text])))
 
 (rum/defc notification-content
@@ -138,7 +143,7 @@
                 :stroke-linejoin "round"
                 :stroke-linecap  "round"}]]]
             :warning
-            ["text-gray-900"
+            ["text-gray-900 dark:text-gray-300 "
              [:svg.h-6.w-6.text-yellow-500
               {:stroke "currentColor", :viewBox "0 0 24 24", :fill "none"}
               [:path
@@ -280,11 +285,16 @@
         (.removeEventListener viewport "resize" handler)
         (.removeEventListener viewport "scroll" handler)))))
 
-;; FIXME: compute the right scroll position when scrolling back to the top
+(defn setup-system-theme-effect!
+  []
+  (let [^js schemaMedia (js/window.matchMedia "(prefers-color-scheme: dark)")]
+    (.addEventListener schemaMedia "change" state/sync-system-theme!)
+    (state/sync-system-theme!)
+    #(.removeEventListener schemaMedia "change" state/sync-system-theme!)))
+
 (defn on-scroll
-  [on-load on-top-reached]
-  (let [node js/document.documentElement
-        full-height (gobj/get node "scrollHeight")
+  [node on-load on-top-reached]
+  (let [full-height (gobj/get node "scrollHeight")
         scroll-top (gobj/get node "scrollTop")
         client-height (gobj/get node "clientHeight")
         bottom-reached? (<= (- full-height scroll-top client-height) 100)
@@ -297,92 +307,67 @@
 (defn attach-listeners
   "Attach scroll and resize listeners."
   [state]
-  (let [opts (-> state :rum/args second)
+
+  (let [list-element-id (first (:rum/args state))
+        opts (-> state :rum/args (nth 2))
+        node (js/document.getElementById list-element-id)
         debounced-on-scroll (util/debounce 500 #(on-scroll
+                                                 node
                                                  (:on-load opts) ; bottom reached
                                                  (:on-top-reached opts)))]
-    (mixins/listen state js/document :scroll debounced-on-scroll)))
+    (mixins/listen state node :scroll debounced-on-scroll)))
 
 (rum/defcs infinite-list <
   (mixins/event-mixin attach-listeners)
   "Render an infinite list."
-  [state body {:keys [on-load on-top-reached]
-               :as   opts}]
-  body)
+  [state list-element-id body {:keys [on-load has-more]}]
+  (rum/with-context [[t] i18n/*tongue-context*]
+    (rum/fragment
+     body
+     (when has-more
+       [:a.fade-link.text-link.font-bold.text-4xl
+        {:on-click on-load}
+        (t :page/earlier)]))))
 
 (rum/defcs auto-complete <
   (rum/local 0 ::current-idx)
-  (mixins/event-mixin
-   (fn [state]
-     (mixins/on-key-down
-      state
-      {;; up
-       38 (fn [_ e]
-            (let [current-idx (get state ::current-idx)
-                  matched (first (:rum/args state))]
-              (util/stop e)
-              (cond
-                (>= @current-idx 1)
-                (swap! current-idx dec)
-                (= @current-idx 0)
-                (reset! current-idx (dec (count matched)))
-
-                :else
-                nil)
-              (when-let [element (gdom/getElement (str "ac-" @current-idx))]
-                (let [ac-inner (gdom/getElement "ui__ac-inner")
-                      element-top (gobj/get element "offsetTop")
-                      scroll-top (- (gobj/get element "offsetTop") 360)]
-                  (set! (.-scrollTop ac-inner) scroll-top)))))
-         ;; down
-       40 (fn [state e]
-            (let [current-idx (get state ::current-idx)
-                  matched (first (:rum/args state))]
-              (util/stop e)
-              (let [total (count matched)]
-                (if (>= @current-idx (dec total))
-                  (reset! current-idx 0)
-                  (swap! current-idx inc)))
-              (when-let [element (gdom/getElement (str "ac-" @current-idx))]
-                (let [ac-inner (gdom/getElement "ui__ac-inner")
-                      element-top (gobj/get element "offsetTop")
-                      scroll-top (- (gobj/get element "offsetTop") 360)]
-                  (set! (.-scrollTop ac-inner) scroll-top)))))
-
-         ;; enter
-       13 (fn [state e]
-            (util/stop e)
-            (let [[matched {:keys [on-chosen on-enter]}] (:rum/args state)]
-              (let [current-idx (get state ::current-idx)]
-                (if (and (seq matched)
-                         (> (count matched)
-                            @current-idx))
-                  (on-chosen (nth matched @current-idx) false)
-                  (and on-enter (on-enter state))))))})))
-  [state matched {:keys [on-chosen
-                         on-shift-chosen
-                         on-enter
-                         empty-div
-                         item-render
-                         class]}]
+  (shortcut/mixin :shortcut.handler/auto-complete)
+  [state
+   matched
+   {:keys [on-chosen
+           on-shift-chosen
+           get-group-name
+           empty-div
+           item-render
+           class]}]
   (let [current-idx (get state ::current-idx)]
     [:div#ui__ac {:class class}
      (if (seq matched)
        [:div#ui__ac-inner.hide-scrollbar
         (for [[idx item] (medley/indexed matched)]
-          (rum/with-key
-            (menu-link
-             {:id       (str "ac-" idx)
-              :class    (when (= @current-idx idx)
-                          "chosen")
-               ;; :tab-index -1
-              :on-click (fn [e]
-                          (.preventDefault e)
-                          (if (and (gobj/get e "shiftKey") on-shift-chosen)
-                            (on-shift-chosen item)
-                            (on-chosen item)))}
-             (if item-render (item-render item) item))
-            idx))]
+          [:<>
+           {:key idx}
+           (let [item-cp
+                 [:div {:key idx}
+                  (menu-link
+                   {:id       (str "ac-" idx)
+                    :class    (when (= @current-idx idx)
+                                "chosen")
+                    :on-mouse-down (fn [e]
+                                     (util/stop e)
+                                     (if (and (gobj/get e "shiftKey") on-shift-chosen)
+                                       (on-shift-chosen item)
+                                       (on-chosen item)))}
+                   (if item-render (item-render item) item))]]
+
+             (if get-group-name
+               (if-let [group-name (get-group-name item)]
+                 [:div
+                  [:div.ui__ac-group-name group-name]
+                  item-cp]
+                 item-cp)
+
+               item-cp))])]
        (when empty-div
          empty-div))]))
 
@@ -400,32 +385,24 @@
       {:class       (if on? (if small? "translate-x-4" "translate-x-5") "translate-x-0")
        :aria-hidden "true"}]]]))
 
-(defn tooltip
-  ([label children]
-   (tooltip label children {}))
-  ([label children {:keys [label-style]}]
-   [:div.Tooltip {:style {:display "inline"}}
-    [:div (cond->
-           {:class "Tooltip__label"}
-            label-style
-            (assoc :style label-style))
-     label]
-    children]))
+(defn apply-close-fn [close-fn]
+  (fn [] (apply (or (gobj/get close-fn "user-close") close-fn) [])))
 
 (defonce modal-show? (atom false))
 (rum/defc modal-overlay
-  [state]
+  [state close-fn]
   [:div.ui__modal-overlay
    {:class (case state
              "entering" "ease-out duration-300 opacity-0"
              "entered" "ease-out duration-300 opacity-100"
              "exiting" "ease-in duration-200 opacity-100"
-             "exited" "ease-in duration-200 opacity-0")}
+             "exited" "ease-in duration-200 opacity-0")
+    :on-click (apply-close-fn close-fn)}
    [:div.absolute.inset-0.opacity-75]])
 
 (rum/defc modal-panel
-  [panel-content transition-state close-fn]
-  [:div.ui__modal-panel.transform.transition-all.sm:min-w-lg.sm.p-6
+  [panel-content transition-state close-fn fullscreen?]
+  [:div.ui__modal-panel.transform.transition-all.sm:min-w-lg.sm
    {:class (case transition-state
              "entering" "ease-out duration-300 opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
              "entered" "ease-out duration-300 opacity-100 translate-y-0 sm:scale-100"
@@ -435,7 +412,7 @@
     [:button.ui__modal-close
      {:aria-label "Close"
       :type       "button"
-      :on-click   (fn [] (apply (or (gobj/get close-fn "user-close") close-fn) []))}
+      :on-click   close-fn}
      [:svg.h-6.w-6
       {:stroke "currentColor", :view-box "0 0 24 24", :fill "none"}
       [:path
@@ -444,7 +421,8 @@
         :stroke-linejoin "round"
         :stroke-linecap  "round"}]]]]
 
-   (panel-content close-fn)])
+   [:div {:class (if fullscreen? "" "panel-content")}
+    (panel-content close-fn)]])
 
 (rum/defc modal < rum/reactive
   (mixins/event-mixin
@@ -452,11 +430,20 @@
      (mixins/hide-when-esc-or-outside
       state
       :on-hide (fn []
-                 (-> (.querySelector (rum/dom-node state) "button.ui__modal-close")
-                     (.click)))
-      :outside? false)))
+                 (some->
+                  (.querySelector (rum/dom-node state) "button.ui__modal-close")
+                  (.click)))
+      :outside? false)
+     (mixins/on-key-down
+      state
+      {;; enter
+       13 (fn [state e]
+            (some->
+             (.querySelector (rum/dom-node state) "button.ui__modal-enter")
+             (.click)))})))
   []
   (let [modal-panel-content (state/sub :modal/panel-content)
+        fullscreen? (state/sub :modal/fullscreen?)
         show? (boolean modal-panel-content)
         close-fn #(state/close-modal!)
         modal-panel-content (or modal-panel-content (fn [close] [:div]))]
@@ -465,14 +452,16 @@
      (css-transition
       {:in show? :timeout 0}
       (fn [state]
-        (modal-overlay state)))
+        (modal-overlay state close-fn)))
      (css-transition
       {:in show? :timeout 0}
       (fn [state]
-        (modal-panel modal-panel-content state close-fn)))]))
+        (modal-panel modal-panel-content state close-fn fullscreen?)))]))
 
 (defn make-confirm-modal
-  [{:keys [tag title sub-title sub-checkbox? on-cancel on-confirm] :as opts}]
+  [{:keys [tag title sub-title sub-checkbox? on-cancel on-confirm]
+    :or {on-cancel #()}
+    :as opts}]
   (fn [close-fn]
     (rum/with-context [[t] i18n/*tongue-context*]
       (let [*sub-checkbox-selected (and sub-checkbox? (atom []))]
@@ -489,7 +478,7 @@
               :stroke-linejoin "round"
               :stroke-linecap  "round"}]]]
           [:div.mt-3.text-center.sm:mt-0.sm:ml-4.sm:text-left
-           [:h2.headline.text-lg.leading-6.font-medium.text-gray-900
+           [:h2.headline.text-lg.leading-6.font-medium
             (if (keyword? title) (t title) title)]
            [:label.sublabel
             (when sub-checkbox?
@@ -580,6 +569,7 @@
                       "important" svg/important
                       "caution" svg/caution
                       "warning" svg/warning
+                      "pinned" svg/pinned
                       nil)]
       [:div.flex.flex-row.admonitionblock.align-items {:class type}
        [:div.pr-4.admonition-icon.flex.flex-col.justify-center
@@ -593,6 +583,9 @@
        (js/console.dir error)
        (assoc state ::error error))}
   [{error ::error, c :rum/react-component} error-view view]
+  (when error
+    (js/console.error error)
+    (log/error :ui/catch-error error))
   (if (some? error)
     error-view
     view))
@@ -611,3 +604,26 @@
                 selected
                 (assoc :selected selected))
       label])])
+
+(rum/defcs tippy < rum/static
+  (rum/local false ::mounted?)
+  [state opts child]
+  (let [*mounted? (::mounted? state)
+        mounted? @*mounted?]
+    (Tippy (->
+           (merge {:arrow true
+                   :sticky true
+                   :theme (:ui/theme @state/state)
+                   :disabled (not (state/enable-tooltip?))
+                   :unmountHTMLWhenHide true
+                   :open @*mounted?
+                   :onShow #(reset! *mounted? true)
+                   :onHide #(reset! *mounted? false)}
+                  opts)
+           (assoc :html (if mounted?
+                          (when-let [html (:html opts)]
+                            (if (fn? html)
+                              (html)
+                              html))
+                          [:div ""])))
+          child)))

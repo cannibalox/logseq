@@ -54,26 +54,10 @@
                (.toString 16)
                (.padStart 6 "0"))))
 
-(defn- dot-mode
-  [node ctx global-scale dark?]
-  (let [label (gobj/get node "id")
-        val (gobj/get node "val")
-        font-size (/ 15 global-scale)
-        arc-radius (/ 3 global-scale)
-        x (gobj/get node "x")
-        y (gobj/get node "y")
-        color (gobj/get node "color")]
-    (set! (.-fillStyle ctx) color)
-    (.beginPath ctx)
-    (.arc ctx x y (if (zero? val)
-                    arc-radius
-                    (* arc-radius (js/Math.sqrt (js/Math.sqrt val)))) 0 (* 2 js/Math.PI) false)
-    (set! (.-fillStyle ctx) (if dark? "#759f8f" "#222")) ;; hpx change color
-    (.fill ctx)))
-
 (defn- dot-text-mode
   [node ctx global-scale dark?]
-  (let [label (gobj/get node "id")
+  (let [hide-text? (< global-scale 0.45)
+        label (gobj/get node "id")
         val (gobj/get node "val")
         val (if (zero? val) 1 val)
         highlighted (contains? @highlight-nodes label)
@@ -90,9 +74,10 @@
     (set! (.-filltextAlign ctx) "center")
     (set! (.-textBaseLine ctx) "middle")
     (set! (.-fillStyle ctx) color)
-    (.fillText ctx label
-               (- x (/ text-width 2))
-               (- y (/ 9 global-scale)))
+    (when-not hide-text?
+      (.fillText ctx label
+                 (- x (/ text-width 2))
+                 (- y (/ 9 global-scale))))
 
     (.beginPath ctx)
     (.arc ctx x y (if (zero? val)
@@ -125,7 +110,7 @@
      :nodes nodes}))
 
 (defn- build-graph-opts
-  [graph dark? dot-mode? option]
+  [graph dark? option]
   (let [nodes-count (count (:nodes graph))
         graph-data (build-graph-data graph)]
     (merge
@@ -166,7 +151,7 @@
                 (let [k (:k (bean/->clj z))]
                   (reset! graph-mode
                           (cond
-                            (or dot-mode? (< k 0.4))
+                            (< k 0.4)
                             :dot
 
                             :else
@@ -175,7 +160,7 @@
                      (let [page-name (string/lower-case (gobj/get node "id"))]
                        (if (gobj/get event "shiftKey")
                          (let [repo (state/get-current-repo)
-                               page (db/entity repo [:page/name page-name])]
+                               page (db/entity repo [:block/name page-name])]
                            (state/sidebar-add-block!
                             repo
                             (:db/id page)

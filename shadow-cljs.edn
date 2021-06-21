@@ -12,6 +12,9 @@
               :depends-on #{:main}}
              :age-encryption
              {:entries [frontend.extensions.age-encryption]
+              :depends-on #{:main}}
+             :excalidraw
+             {:entries [frontend.extensions.excalidraw]
               :depends-on #{:main}}}
 
    :output-dir "./static/js"
@@ -19,7 +22,7 @@
    :release {:asset-path "https://asset.logseq.com/static/js"}
    :compiler-options {:infer-externs :auto
                       :output-feature-set :es-next
-                      ;; :source-map true
+                      :source-map true
                       :externs ["datascript/externs.js"
                                 "externs.js"]
                       :warnings {:fn-deprecated false}}
@@ -34,14 +37,21 @@
     :http-root    "public"
     :http-port    3001
     :watch-path   "static"
-    :preloads     [devtools.preload]}}
+    :preloads     [devtools.preload
+                   shadow.remote.runtime.cljs.browser]}}
 
   :electron {:target :node-script
              :output-to "static/electron.js"
              :main electron.core/main
              :devtools
              {:before-load electron.core/stop
-              :after-load electron.core/start}}
+              :after-load electron.core/start}
+             :compiler-options
+             {:infer-externs :auto
+              :source-map true
+              :externs ["datascript/externs.js"
+                        "externs.js"]
+              :warnings {:fn-deprecated false}}}
 
   :test
   {:target :node-test
@@ -58,6 +68,9 @@
               :depends-on #{:main}}
              :age-encryption
              {:entries [frontend.extensions.age-encryption]
+              :depends-on #{:main}}
+             :excalidraw
+             {:entries [frontend.extensions.excalidraw]
               :depends-on #{:main}}}
 
    :output-dir "./static/js/publishing"
@@ -76,4 +89,20 @@
    {:before-load frontend.core/stop
     ;; after live-reloading finishes call this function
     :after-load frontend.core/start
-    :preloads     [devtools.preload]}}}}
+    :preloads     [devtools.preload]}}
+
+  :cards {:target     nubank.workspaces.shadow-cljs.target
+          :ns-regexp  "(test|cards)$"
+          :output-dir "./static/js/workspaces"
+          :asset-path "/static/js/workspaces"
+          :preloads   [] ; optional, list namespaces to be pre loaded
+          :devtools
+          {
+           :after-load   nubank.workspaces.core/after-load
+           :loader-mode  :eval
+           :http-root    "public/workspaces"
+           :http-port    9670
+           :watch-path   "static"
+           :preloads     [devtools.preload
+                          shadow.remote.runtime.cljs.browser]}
+          :modules {:main {:entries [workspaces.main]}}}}}

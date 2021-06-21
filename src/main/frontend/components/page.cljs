@@ -1,6 +1,7 @@
 (ns frontend.components.page
   (:require [rum.core :as rum]
             [frontend.util :as util :refer-macros [profile]]
+            [frontend.util.marker :as marker]
             [frontend.tools.html-export :as html-export]
             [frontend.handler.file :as file]
             [frontend.handler.page :as page-handler]
@@ -14,12 +15,13 @@
             [clojure.string :as string]
             [frontend.components.block :as block]
             [frontend.components.editor :as editor]
+            [frontend.components.plugins :as plugins]
             [frontend.components.reference :as reference]
             [frontend.components.svg :as svg]
+            [frontend.components.export :as export]
             [frontend.extensions.graph-2d :as graph-2d]
             [frontend.ui :as ui]
             [frontend.components.content :as content]
-            [frontend.components.project :as project]
             [frontend.config :as config]
             [frontend.db :as db]
             [frontend.db.model :as model]
@@ -38,6 +40,7 @@
             [frontend.context.i18n :as i18n]
             [reitit.frontend.easy :as rfe]
             [frontend.text :as text]
+            [frontend.modules.shortcut.core :as shortcut]
             [frontend.handler.block :as block-handler]))
 
 (defn- get-page-name
@@ -54,68 +57,82 @@
         (page-handler/add-page-to-recent! repo page-original-name)
         (db/get-page-blocks repo page-name)))))
 
+(defn- open-first-block!
+  [state]
+  (let [blocks (nth (:rum/args state) 1)
+        block (first blocks)]
+    (when (and (= (count blocks) 1)
+               (string/blank? (:block/content block)))
+      (editor-handler/edit-block! block :max (:block/format block) (:block/uuid block))))
+  state)
+
+(rum/defc page-blocks-inner <
+  {:did-mount open-first-block!
+   :did-update open-first-block!}
+  [page-name page-blocks hiccup sidebar?]
+  [:div.page-blocks-inner
+   (rum/with-key
+     (content/content page-name
+                      {:hiccup   hiccup
+                       :sidebar? sidebar?})
+     (str page-name "-hiccup"))])
+
+(declare page)
+
+(defn- get-page-format
+  [page-name]
+  (let [block? (util/uuid-string? page-name)
+        block-id (and block? (uuid page-name))
+        page (if block-id
+               (:block/name (:block/page (db/entity [:block/uuid block-id])))
+               page-name)]
+    (db/get-page-format page)))
+
+(rum/defc dummy-block
+  [page-name]
+  [:div.ls-block.flex-1.flex-col.rounded-sm {:style {:width "100%"}}
+   [:div.flex.flex-row
+    [:div.flex.flex-row.items-center.mr-2.ml-1 {:style {:height 24}}
+     [:span.bullet-container.cursor
+      [:span.bullet]]]
+    [:div.flex.flex-1 {:on-click #(editor-handler/insert-first-page-block-if-not-exists! page-name)}
+     [:span.opacity-50
+      "Click here to edit..."]]]])
+
 (rum/defc page-blocks-cp < rum/reactive
   db-mixins/query
-  [repo page file-path page-name page-original-name encoded-page-name sidebar? journal? block? block-id format]
-  (let [raw-page-blocks (get-blocks repo page-name page-original-name block? block-id)
-        grouped-blocks-by-file (into {} (for [[k v] (db-utils/group-by-file raw-page-blocks)]
-                                          [(:file/path (db-utils/entity (:db/id k))) v]))
-        raw-page-blocks (get grouped-blocks-by-file file-path raw-page-blocks)
-        page-blocks (block-handler/with-dummy-block raw-page-blocks format
-                      (if (empty? raw-page-blocks)
-                        (let [content (db/get-file repo file-path)]
-                          {:block/page {:db/id (:db/id page)}
-                           :block/file {:db/id (:db/id (:page/file page))}
-                           :block/meta
-                           (let [file-id (:db/id (:page/file page))]
-                             {:start-pos (utf8/length (utf8/encode content))
-                              :end-pos nil})}))
-                      {:journal? journal?
-                       :page-name page-name})
-        start-level (or (:block/level (first page-blocks)) 1)
-        hiccup-config {:id (if block? (str block-id) page-name)
-                       :start-level start-level
-                       :sidebar? sidebar?
-                       :block? block?
-                       :editor-box editor/box}
-        hiccup-config (common-handler/config-with-document-mode hiccup-config)
-        hiccup (block/->hiccup page-blocks hiccup-config {})]
-    [:div.page-blocks-inner
-     (when (and (seq grouped-blocks-by-file)
-                (> (count grouped-blocks-by-file) 1))
-       (ui/admonition
-        :warning
-        [:div.text-sm
-         [:p.font-medium "Those pages have the same title, you might want to only keep one file."]
-         [:ol
-          (for [[file-path blocks] (into (sorted-map) grouped-blocks-by-file)]
-            [:li [:a {:key file-path
-                      :href (rfe/href :file {:path file-path})} file-path]])]]))
-
-     (rum/with-key
-       (content/content page-name
-                        {:hiccup   hiccup
-                         :sidebar? sidebar?})
-       (str encoded-page-name "-hiccup"))]))
+  [repo page-e {:keys [sidebar? preview?] :as config}]
+  (when page-e
+    (let [page-name (or (:block/name page-e)
+                        (str (:block/uuid page-e)))
+          page-original-name (or (:block/original-name page-e) page-name)
+          format (get-page-format page-name)
+          journal? (db/journal-page? page-name)
+          block? (util/uuid-string? page-name)
+          block-id (and block? (uuid page-name))
+          page-empty? (and (not block?) (db/page-empty? repo (:db/id page-e)))
+          page-e (if (and page-e (:db/id page-e))
+                   {:db/id (:db/id page-e)}
+                   page-e)
+          page-blocks (get-blocks repo page-name page-original-name block? block-id)]
+      (if (empty? page-blocks)
+        (dummy-block page-name)
+        (let [document-mode? (state/sub :document/mode?)
+              hiccup-config (merge
+                             {:id (if block? (str block-id) page-name)
+                              :block? block?
+                              :editor-box editor/box
+                              :page page
+                              :document/mode? document-mode?}
+                             config)
+              hiccup-config (common-handler/config-with-document-mode hiccup-config)
+              hiccup (block/->hiccup page-blocks hiccup-config {})]
+          (page-blocks-inner page-name page-blocks hiccup sidebar?))))))
 
 (defn contents-page
-  [{:page/keys [name original-name file] :as contents}]
+  [page]
   (when-let [repo (state/get-current-repo)]
-    (let [format (db/get-page-format name)
-          file-path (:file/path file)]
-      (page-blocks-cp repo contents file-path name original-name name true false false nil format))))
-
-(defn presentation
-  [repo page]
-  [:a.opacity-50.hover:opacity-100
-   {:title "Presentation mode (Powered by Reveal.js)"
-    :on-click (fn []
-                (state/sidebar-add-block!
-                 repo
-                 (:db/id page)
-                 :page-presentation
-                 {:page page}))}
-   svg/slideshow])
+    (page-blocks-cp repo page {:sidebar? true})))
 
 (rum/defc today-queries < rum/reactive
   [repo today? sidebar?]
@@ -125,9 +142,9 @@
         [:div#today-queries.mt-10
          (for [{:keys [title] :as query} queries]
            (rum/with-key
-             (block/custom-query {:start-level 2
-                                  :attr {:class "mt-10"}
-                                  :editor-box editor/box} query)
+             (block/custom-query {:attr {:class "mt-10"}
+                                  :editor-box editor/box
+                                  :page page} query)
              (str repo "-custom-query-" (:query query))))]))))
 
 (defn- delete-page!
@@ -155,13 +172,14 @@
             :stroke-linejoin "round"
             :stroke-linecap "round"}]]]
         [:div.mt-3.text-center.sm:mt-0.sm:ml-4.sm:text-left
-         [:h3#modal-headline.text-lg.leading-6.font-medium.text-gray-900
+         [:h3#modal-headline.text-lg.leading-6.font-medium
           (t :page/delete-confirmation)]]]
 
        [:div.mt-5.sm:mt-4.sm:flex.sm:flex-row-reverse
         [:span.flex.w-full.rounded-md.shadow-sm.sm:ml-3.sm:w-auto
          [:button.inline-flex.justify-center.w-full.rounded-md.border.border-transparent.px-4.py-2.bg-indigo-600.text-base.leading-6.font-medium.text-white.shadow-sm.hover:bg-indigo-500.focus:outline-none.focus:border-indigo-700.focus:shadow-outline-indigo.transition.ease-in-out.duration-150.sm:text-sm.sm:leading-5
           {:type "button"
+           :class "ui__modal-enter"
            :on-click (fn []
                        (delete-page! page-name))}
           (t :yes)]]
@@ -172,19 +190,19 @@
           (t :cancel)]]]])))
 
 (rum/defcs rename-page-dialog-inner <
+  (shortcut/disable-all-shortcuts)
   (rum/local "" ::input)
-  [state page-name close-fn]
+  [state title page-name close-fn]
   (let [input (get state ::input)]
     (rum/with-context [[t] i18n/*tongue-context*]
       [:div.w-full.sm:max-w-lg.sm:w-96
        [:div.sm:flex.sm:items-start
         [:div.mt-3.text-center.sm:mt-0.sm:text-left
-         [:h3#modal-headline.text-lg.leading-6.font-medium.text-gray-900
-          (t :page/rename-to page-name)]]]
+         [:h3#modal-headline.text-lg.leading-6.font-medium
+          (t :page/rename-to title)]]]
 
        [:input.form-input.block.w-full.sm:text-sm.sm:leading-5.my-2
         {:auto-focus true
-         :style {:color "#000"}
          :on-change (fn [e]
                       (reset! input (util/evalue e)))}]
 
@@ -192,12 +210,12 @@
         [:span.flex.w-full.rounded-md.shadow-sm.sm:ml-3.sm:w-auto
          [:button.inline-flex.justify-center.w-full.rounded-md.border.border-transparent.px-4.py-2.bg-indigo-600.text-base.leading-6.font-medium.text-white.shadow-sm.hover:bg-indigo-500.focus:outline-none.focus:border-indigo-700.focus:shadow-outline-indigo.transition.ease-in-out.duration-150.sm:text-sm.sm:leading-5
           {:type "button"
+           :class "ui__modal-enter"
            :on-click (fn []
-                       (let [value @input]
-                         (let [value (string/trim value)]
-                           (when-not (string/blank? value)
-                             (page-handler/rename! page-name value)
-                             (state/close-modal!)))))}
+                       (let [value (string/trim @input)]
+                         (when-not (string/blank? value)
+                           (page-handler/rename! page-name value)
+                           (state/close-modal!))))}
           (t :submit)]]
         [:span.mt-3.flex.w-full.rounded-md.shadow-sm.sm:mt-0.sm:w-auto
          [:button.inline-flex.justify-center.w-full.rounded-md.border.border-gray-300.px-4.py-2.bg-white.text-base.leading-6.font-medium.text-gray-700.shadow-sm.hover:text-gray-500.focus:outline-none.focus:border-blue-300.focus:shadow-outline-blue.transition.ease-in-out.duration-150.sm:text-sm.sm:leading-5
@@ -206,9 +224,9 @@
           (t :cancel)]]]])))
 
 (defn rename-page-dialog
-  [page-name]
+  [title page-name]
   (fn [close-fn]
-    (rename-page-dialog-inner page-name close-fn)))
+    (rename-page-dialog-inner title page-name close-fn)))
 
 (defn tagged-pages
   [repo tag]
@@ -226,210 +244,146 @@
 
 ;; A page is just a logical block
 (rum/defcs page < rum/reactive
-  {:did-mount (fn [state]
-                (ui-handler/scroll-and-highlight! state)
-                state)
-   :did-update (fn [state]
-                 (ui-handler/scroll-and-highlight! state)
-                 state)}
-  [state {:keys [repo] :as option}]
-  (let [current-repo (state/sub :git/current-repo)
-        repo (or repo current-repo)
-        encoded-page-name (or (get-page-name state)
-                              (state/get-current-page))
-        path-page-name (util/url-decode encoded-page-name)
-        page-name (string/lower-case path-page-name)
-        marker-page? (util/marker? page-name)
-        priority-page? (contains? #{"a" "b" "c"} page-name)
-        block? (util/uuid-string? page-name)
-        block-id (and block? (uuid page-name))
-        format (let [page (if block-id
-                            (:page/name (:block/page (db/entity [:block/uuid block-id])))
-                            page-name)]
-                 (db/get-page-format page))
-        journal? (db/journal-page? page-name)
-        sidebar? (:sidebar? option)]
-    (rum/with-context [[t] i18n/*tongue-context*]
-      (cond
-        priority-page?
-        [:div.page
-         [:h1.title
-          (t :page/priority (string/upper-case page-name))]
-         [:div.ml-2
-          (reference/references page-name false true)]]
-
-        marker-page?
-        [:div.page
-         [:h1.title
-          (string/upper-case page-name)]
-         [:div.ml-2
-          (reference/references page-name true false)]]
-
-        :else
-        (let [route-page-name page-name
+  [state {:keys [repo page-name preview?] :as option}]
+  (when-let [path-page-name (or page-name
+                                (get-page-name state)
+                                (state/get-current-page))]
+    (let [current-repo (state/sub :git/current-repo)
+          repo (or repo current-repo)
+          page-name (string/lower-case path-page-name)
+          block? (util/uuid-string? page-name)
+          block-id (and block? (uuid page-name))
+          format (let [page (if block-id
+                              (:block/name (:block/page (db/entity [:block/uuid block-id])))
+                              page-name)]
+                   (db/get-page-format page))
+          journal? (db/journal-page? page-name)
+          sidebar? (:sidebar? option)]
+      (rum/with-context [[t] i18n/*tongue-context*]
+        (let [route-page-name path-page-name
               page (if block?
                      (->> (:db/id (:block/page (db/entity repo [:block/uuid block-id])))
                           (db/entity repo))
-                     (db/entity repo [:page/name page-name]))
-              page (if page page (do
-                                   (db/transact! repo [{:page/name page-name
-                                                        :page/original-name path-page-name}])
-                                   (db/entity repo [:page/name page-name])))
-              properties (:page/properties page)
-              page-name (:page/name page)
-              page-original-name (:page/original-name page)
-              file (:page/file page)
-              file-path (and (:db/id file) (:file/path (db/entity repo (:db/id file))))
+                     (do
+                       (when-not (db/entity repo [:block/name page-name])
+                         (db/transact! repo [{:block/name page-name
+                                              :block/original-name path-page-name
+                                              :block/uuid (db/new-block-id)}]))
+                       (db/pull [:block/name page-name])))
+              _ (when (and (not block?) (db/page-empty? (state/get-current-repo) (:db/id page)))
+                  (page-handler/create! page-name {:page-map page
+                                                   :redirect? false
+                                                   :create-first-block? false}))
+              {:keys [title] :as properties} (:block/properties page)
+              page-name (:block/name page)
+              page-original-name (:block/original-name page)
+              title (or title page-original-name page-name)
               today? (and
                       journal?
                       (= page-name (string/lower-case (date/journal-name))))
               developer-mode? (state/sub [:ui/developer-mode?])
-              published? (= "true" (:published properties))
-              public? (= "true" (:public properties))]
-          [:div.flex-1.page.relative (if (seq (:page/tags page))
-                                       (let [page-names (model/get-page-names-by-ids (map :db/id (:page/tags page)))]
+              public? (true? (:public properties))]
+          [:div.flex-1.page.relative (if (seq (:block/tags page))
+                                       (let [page-names (model/get-page-names-by-ids (map :db/id (:block/tags page)))]
                                          {:data-page-tags (text/build-data-value page-names)})
                                        {})
            [:div.relative
-            (when (and (not block?)
-                       (not sidebar?)
-                       (not config/publishing?))
-
-              (let [contents? (= (string/lower-case (str page-name)) "contents")
-                    links (->>
-                           [(when-not contents?
-                              {:title (t :page/add-to-contents)
-                               :options {:on-click (fn [] (page-handler/handle-add-page-to-contents! page-original-name))}})
-
-                            (when-not contents?
-                              {:title (t :page/rename)
-                               :options {:on-click #(state/set-modal! (rename-page-dialog page-name))}})
-
-                            (when (and file-path (util/electron?))
-                              [{:title   (t :page/open-in-finder)
-                                :options {:on-click #(js/window.apis.showItemInFolder file-path)}}
-                               {:title (t :page/open-with-default-app)
-                                :options {:on-click #(js/window.apis.openPath file-path)}}])
-
-                            (when-not contents?
-                              {:title (t :page/delete)
-                               :options {:on-click #(state/set-modal! (delete-page-dialog page-name))}})
-
-                            {:title   (t :page/action-publish)
-                             :options {:on-click
-                                       (fn []
-                                         (state/set-modal!
-                                          (fn []
-                                            [:div.cp__page-publish-actions
-                                             (mapv (fn [{:keys [title options]}]
-                                                     (when title
-                                                       [:div.it
-                                                        (apply (partial ui/button title) (flatten (seq options)))]))
-                                                   [(if published?
-                                                      {:title   (t :page/unpublish)
-                                                       :options {:on-click (fn []
-                                                                             (page-handler/unpublish-page! page-name))}}
-                                                      {:title   (t :page/publish)
-                                                       :options {:on-click (fn []
-                                                                             (page-handler/publish-page!
-                                                                              page-name project/add-project
-                                                                              html-export/export-page))}})
-                                                    (when-not published?
-                                                      {:title   (t :page/publish-as-slide)
-                                                       :options {:on-click (fn []
-                                                                             (page-handler/publish-page-as-slide!
-                                                                              page-name project/add-project
-                                                                              html-export/export-page))}})
-                                                    {:title   (t (if public? :page/make-private :page/make-public))
-                                                     :options {:background (if public? "gray" "indigo")
-                                                               :on-click (fn []
-                                                                           (page-handler/update-public-attribute!
-                                                                            page-name
-                                                                            (if public? false true))
-                                                                           (state/close-modal!))}}])])))}}
-
-                            (when file
-                              {:title (t :page/re-index)
-                               :options {:on-click (fn []
-                                                     (file/re-index! file))}})
-
-                            (when developer-mode?
-                              {:title "(Dev) Show page data"
-                               :options {:on-click (fn []
-                                                     (let [page-data (with-out-str (pprint/pprint (db/pull (:db/id page))))]
-                                                       (println page-data)
-                                                       (notification/show!
-                                                        [:div
-                                                         [:pre.code page-data]
-                                                         [:br]
-                                                         (ui/button "Copy to clipboard"
-                                                                    :on-click #(.writeText js/navigator.clipboard page-data))]
-                                                        :success
-                                                        false)))}})]
-                           (flatten)
-                           (remove nil?))]
-                (when (seq links)
-                  (ui/dropdown-with-links
-                   (fn [{:keys [toggle-fn]}]
-                     [:a.opacity-70.hover:opacity-100
-                      {:style {:position "absolute"
-                               :right 0
-                               :top 20}
-                       :title "More options"
-                       :on-click toggle-fn}
-                      (svg/vertical-dots {:class (util/hiccup->class "opacity-50.hover:opacity-100.h-5.w-5")})])
-                   links
-                   {:modal-class (util/hiccup->class
-                                  "origin-top-right.absolute.right-0.top-10.mt-2.rounded-md.shadow-lg.whitespace-no-wrap.dropdown-overflow-auto.page-drop-options")
-                    :z-index 1}))))
             (when (and (not sidebar?)
                        (not block?))
-              [:a {:on-click (fn [e]
-                               (.preventDefault e)
-                               (when (gobj/get e "shiftKey")
-                                 (when-let [page (db/pull repo '[*] [:page/name page-name])]
-                                   (state/sidebar-add-block!
-                                    repo
-                                    (:db/id page)
-                                    :page
-                                    {:page page}))))}
-               [:h1.title {:style {:margin-left -2}}
-                (if page-original-name
-                  (if (and (string/includes? page-original-name "[[")
-                           (string/includes? page-original-name "]]"))
-                    (let [ast (mldoc/->edn page-original-name (mldoc/default-config format))]
-                      (block/markup-element-cp {} (ffirst ast)))
-                    page-original-name)
-                  (or
-                   page-name
-                   path-page-name))]])
+              [:div.flex.flex-row.space-between
+               [:div.flex-1.flex-row
+                [:a {:on-click (fn [e]
+                                 (.preventDefault e)
+                                 (when (gobj/get e "shiftKey")
+                                   (when-let [page (db/pull repo '[*] [:block/name page-name])]
+                                     (state/sidebar-add-block!
+                                      repo
+                                      (:db/id page)
+                                      :page
+                                      {:page page}))))}
+                 [:h1.title {:style {:margin-left -2}}
+                  (if page-original-name
+                    (if (and (string/includes? page-original-name "[[")
+                             (string/includes? page-original-name "]]"))
+                      (let [ast (mldoc/->edn page-original-name (mldoc/default-config format))]
+                        (block/markup-element-cp {} (ffirst ast)))
+                      page-original-name)
+                    (or
+                     page-name
+                     path-page-name))]]]
+               (when (not config/publishing?)
+                 (let [contents? (= (string/lower-case (str page-name)) "contents")
+                       links (fn [] (->>
+                                    [(when-not contents?
+                                       {:title   (t :page/add-to-favorites)
+                                        :options {:on-click (fn [] (page-handler/handle-add-page-to-contents! page-original-name))}})
+
+                                     {:title "Go to presentation mode"
+                                      :options {:on-click (fn []
+                                                            (state/sidebar-add-block!
+                                                             repo
+                                                             (:db/id page)
+                                                             :page-presentation
+                                                             {:page page}))}}
+                                     (when-not contents?
+                                       {:title   (t :page/rename)
+                                        :options {:on-click #(state/set-modal! (rename-page-dialog title page-name))}})
+
+                                     (when-let [file-path (and (util/electron?) (page-handler/get-page-file-path))]
+                                       [{:title   (t :page/open-in-finder)
+                                         :options {:on-click #(js/window.apis.showItemInFolder file-path)}}
+                                        {:title   (t :page/open-with-default-app)
+                                         :options {:on-click #(js/window.apis.openPath file-path)}}])
+
+                                     (when-not contents?
+                                       {:title   (t :page/delete)
+                                        :options {:on-click #(state/set-modal! (delete-page-dialog page-name))}})
+
+                                     (when (state/get-current-page)
+                                       {:title   (t :export)
+                                        :options {:on-click #(state/set-modal! export/export-page)}})
+
+                                     (when (util/electron?)
+                                       {:title   (t (if public? :page/make-private :page/make-public))
+                                        :options {:on-click
+                                                  (fn []
+                                                    (page-handler/update-public-attribute!
+                                                     page-name
+                                                     (if public? false true))
+                                                    (state/close-modal!))}})
+
+                                     (when developer-mode?
+                                       {:title   "(Dev) Show page data"
+                                        :options {:on-click (fn []
+                                                              (let [page-data (with-out-str (pprint/pprint (db/pull (:db/id page))))]
+                                                                (println page-data)
+                                                                (notification/show!
+                                                                 [:div
+                                                                  [:pre.code page-data]
+                                                                  [:br]
+                                                                  (ui/button "Copy to clipboard"
+                                                                    :on-click #(.writeText js/navigator.clipboard page-data))]
+                                                                 :success
+                                                                 false)))}})]
+                                    (flatten)
+                                    (remove nil?)))]
+                   [:div.flex.flex-row
+                    (plugins/hook-ui-slot :page-head-actions-slotted nil)
+                    [:a.opacity-60.hover:opacity-100.page-op.mr-1
+                     {:title "Search in current page"
+                      :on-click #(route-handler/go-to-search! :page)}
+                     svg/search]
+                    (ui/dropdown-with-links
+                     (fn [{:keys [toggle-fn]}]
+                       [:a.cp__vertical-menu-button
+                        {:title    "More options"
+                         :on-click toggle-fn}
+                        (svg/vertical-dots nil)])
+                     links
+                     {:modal-class (util/hiccup->class
+                                    "origin-top-right.absolute.right-0.top-10.mt-2.rounded-md.shadow-lg.whitespace-no-wrap.dropdown-overflow-auto.page-drop-options")
+                      :z-index     1})]))])
             [:div
-             [:div.content
-              (when (and file-path
-                         (not sidebar?)
-                         (not block?)
-                         (not (state/hide-file?))
-                         (not config/publishing?))
-                [:div.text-sm.ml-1.mb-4.flex-1.inline-flex
-                 {:key "page-file"}
-                 [:span.opacity-50 {:style {:margin-top 2}} (t :file/file)]
-                 [:a.bg-base-2.px-1.ml-1.mr-3 {:style {:border-radius 4
-                                                       :word-break    "break-word"}
-                                               :href  (rfe/href :file {:path file-path})}
-                  file-path]
-
-                 (when (not config/mobile?)
-                   (presentation repo page))])]
-
-             (when (and repo (not block?))
-               (let [alias (db/get-page-alias-names repo page-name)]
-                 (when (seq alias)
-                   [:div.text-sm.ml-1.mb-4 {:key "page-file"}
-                    [:span.opacity-50 "Alias: "]
-                    (for [item alias]
-                      [:a.ml-1.mr-1 {:href (rfe/href :page {:name item})}
-                       item])])))
-
              (when (and block? (not sidebar?))
                (let [config {:id "block-parent"
                              :block? true}]
@@ -437,7 +391,10 @@
                   (block/block-parents config repo block-id format)]))
 
              ;; blocks
-             (page-blocks-cp repo page file-path page-name page-original-name encoded-page-name sidebar? journal? block? block-id format)]]
+             (let [page (if block?
+                          (db/entity repo [:block/uuid block-id])
+                          page)]
+               (page-blocks-cp repo page {:sidebar? sidebar?}))]]
 
            (when-not block?
              (today-queries repo today? sidebar?))
@@ -446,25 +403,32 @@
 
            ;; referenced blocks
            [:div {:key "page-references"}
-            (reference/references route-page-name false)]
+            (rum/with-key
+              (reference/references route-page-name false)
+              (str route-page-name "-refs"))]
 
-           [:div {:key "page-unlinked-references"}
-            (reference/unlinked-references route-page-name)]])))))
+           ;; TODO: or we can lazy load them
+           (when-not sidebar?
+             [:div {:key "page-unlinked-references"}
+              (reference/unlinked-references route-page-name)])])))))
 
 (defonce layout (atom [js/window.outerWidth js/window.outerHeight]))
 
 (defonce graph-ref (atom nil))
 (defonce show-journal? (atom false))
-(defonce dot-mode? (atom false))
 
 (rum/defcs global-graph < rum/reactive
+  (mixins/event-mixin
+   (fn [state]
+     (mixins/listen state js/window "resize"
+                    (fn [e]
+                      (reset! layout [js/window.outerWidth js/window.outerHeight])))))
   [state]
   (let [theme (state/sub :ui/theme)
         sidebar-open? (state/sub :ui/sidebar-open?)
         [width height] (rum/react layout)
         dark? (= theme "dark")
-        graph (graph-handler/build-global-graph theme (rum/react show-journal?))
-        dot-mode-value? (rum/react dot-mode?)]
+        graph (graph-handler/build-global-graph theme (rum/react show-journal?))]
     (rum/with-context [[t] i18n/*tongue-context*]
       [:div.relative#global-graph
        (if (seq (:nodes graph))
@@ -472,7 +436,6 @@
           (graph/build-graph-opts
            graph
            dark?
-           dot-mode-value?
            {:width (if (and (> width 1280) sidebar-open?)
                      (- width 24 600)
                      (- width 24))
@@ -481,7 +444,7 @@
             :ref-atom graph-ref}))
          [:div.ls-center.mt-20
           [:p.opacity-70.font-medium "Empty"]])
-       [:div.absolute.top-15.left-5
+       [:div.absolute.top-10.left-5
         [:div.flex.flex-col
          [:a.text-sm.font-medium
           {:on-click (fn [_e]
@@ -515,47 +478,21 @@
            [:table.table-auto
             [:thead
              [:tr
-              [:th (t :page/name)]
+              [:th (t :block/name)]
               [:th (t :file/last-modified-at)]]]
             [:tbody
              (for [page pages]
-               (let [encoded-page (util/encode-str page)]
-                 [:tr {:key encoded-page}
-                  [:td [:a {:on-click (fn [e]
-                                        (let [repo (state/get-current-repo)
-                                              page (db/pull repo '[*] [:page/name (string/lower-case page)])]
-                                          (when (gobj/get e "shiftKey")
-                                            (state/sidebar-add-block!
-                                             repo
-                                             (:db/id page)
-                                             :page
-                                             {:page page}))))
-                            :href (rfe/href :page {:name encoded-page})}
-                        page]]
-                  [:td [:span.text-gray-500.text-sm
-                        (t :file/no-data)]]]))]]))])))
-
-(rum/defcs new < rum/reactive
-  (rum/local "" ::title)
-  (mixins/event-mixin
-   (fn [state]
-     (mixins/on-enter state
-                      :node (gdom/getElement "page-title")
-                      :on-enter (fn []
-                                  (let [title @(get state ::title)]
-                                    (when-not (string/blank? title)
-                                      (page-handler/create! title)))))))
-  [state]
-  (rum/with-context [[t] i18n/*tongue-context*]
-    (let [title (get state ::title)]
-      [:div#page-new.flex-1.flex-col {:style {:flex-wrap "wrap"}}
-       [:div.mt-10.mb-2 {:style {:font-size "1.5rem"}}
-        (t :page/new-title)]
-       [:input#page-title.focus:outline-none.ml-1.text-gray-900
-        {:style {:border "none"
-                 :font-size "1.8rem"
-                 :max-width 300}
-         :auto-focus true
-         :auto-complete "off"
-         :on-change (fn [e]
-                      (reset! title (util/evalue e)))}]])))
+               [:tr {:key page}
+                [:td [:a {:on-click (fn [e]
+                                      (let [repo (state/get-current-repo)
+                                            page (db/pull repo '[*] [:block/name (string/lower-case page)])]
+                                        (when (gobj/get e "shiftKey")
+                                          (state/sidebar-add-block!
+                                           repo
+                                           (:db/id page)
+                                           :page
+                                           {:page page}))))
+                          :href (rfe/href :page {:name page})}
+                      page]]
+                [:td [:span.text-gray-500.text-sm
+                      (t :file/no-data)]]])]]))])))

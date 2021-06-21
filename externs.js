@@ -58,6 +58,14 @@ dummy.concat = function() {};
 dummy.diff_main = function() {};
 dummy.patch_make = function() {};
 dummy.patch_apply = function() {};
+dummy.prepare = function() {};
+dummy.run = function() {};
+dummy.all = function() {};
+dummy.transaction = function() {};
+dummy.getPath = function() {};
+dummy.getDoc = function() {};
+dummy.setValue = function() {};
+
 
 /**
  * @typedef {{

@@ -23,7 +23,7 @@ on:
 
 jobs:
   compile-cljs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v1
@@ -51,7 +51,7 @@ jobs:
           sudo ./linux-install-1.10.1.763.sh
 
       - name: Compile CLJS
-        run: yarn install --frozen-lockfile && gulp build  && yarn cljs:release
+        run: yarn install  && gulp build  && yarn cljs:release
 
       - name: Update APP Version
         run: |
@@ -82,7 +82,7 @@ jobs:
           path: static.zip
 
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     needs: [ compile-cljs ]
     steps:
       - name: Download The Static Asset
@@ -107,17 +107,26 @@ jobs:
           key: ${{ runner.os }}-node-modules
 
       - name: Build/Release Electron App
-        run: yarn install --frozen-lockfile && yarn electron:make
+        run: yarn install  && yarn electron:make
         working-directory: ./static
 
-      - name: Change Artifact Name
-        run: mv static/out/make/zip/linux/x64/Logseq-linux-x64-*.zip  static/out/make/zip/linux/x64/Logseq-linux.zip
+      - name: Change Artifact Name For ZIP File
+        run: mv static/out/make/zip/linux/x64/*-linux-x64-*.zip  static/out/make/zip/linux/x64/Logseq-linux.zip
 
-      - name: Cache Artifact
+      - name: Change Artifact Name For AppImage File
+        run: mv static/out/make/*-*.AppImage  static/out/make/Logseq-linux.AppImage
+
+      - name: Cache Artifact With ZIP format
         uses: actions/upload-artifact@v1
         with:
           name: Logseq-linux.zip
           path: static/out/make/zip/linux/x64/Logseq-linux.zip
+
+      - name: Cache Artifact With AppImage format
+        uses: actions/upload-artifact@v1
+        with:
+          name: Logseq-linux.AppImage
+          path: static/out/make/Logseq-linux.AppImage
 
   build-windows:
     runs-on: windows-latest
@@ -145,7 +154,7 @@ jobs:
           key: ${{ runner.os }}-node-modules
 
       - name: Build/Release Electron app
-        run: yarn install --frozen-lockfile && yarn electron:make
+        run: yarn install  && yarn electron:make
         working-directory: ./static
 
       - name: Change Artifact Name
@@ -197,17 +206,23 @@ jobs:
           key: ${{ runner.os }}-node-modules
 
       - name: Build/Release Electron App
-        run: yarn install --frozen-lockfile && yarn electron:make
+        run: yarn install  && yarn electron:make
         working-directory: ./static
 
       - name: Change DMG Name
-        run: mv static/out/make/Logseq.dmg static/out/make/logseq-darwin-x64-${{ github.event.inputs.tag-version }}.dmg
+        run: mv static/out/make/*.dmg static/out/make/logseq-darwin-x64-${{ github.event.inputs.tag-version }}.dmg
 
       - name: Cache Artifact DMG
         uses: actions/upload-artifact@v1
         with:
           name: Logseq-x64.dmg
           path: static/out/make/logseq-darwin-x64-${{ github.event.inputs.tag-version }}.dmg
+
+      - name: ls files
+        run: du -a static/out/
+
+      - name: Change zip Name
+        run: mv static/out/make/zip/darwin/x64/*.zip static/out/make/zip/darwin/x64/logseq-darwin-x64-${{ github.event.inputs.tag-version }}.zip
 
       - name: Cache Artifact ZIP
         uses: actions/upload-artifact@v1
@@ -217,7 +232,7 @@ jobs:
 
   release:
     needs: [ build-macos, build-linux, build-windows ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
 
     steps:
       - name: Download The MacOS X64 DMG Artifact
@@ -232,10 +247,16 @@ jobs:
           name: Logseq-x64.zip
           path: ./
 
-      - name: Download The Linux Artifact
+      - name: Download The Linux Artifact In Zip format
         uses: actions/download-artifact@v1
         with:
           name: Logseq-linux.zip
+          path: ./
+
+      - name: Download The Linux Artifact In AppImage format
+        uses: actions/download-artifact@v1
+        with:
+          name: Logseq-linux.AppImage
           path: ./
 
       - name: Download The Windows Artifact
@@ -254,7 +275,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.event.inputs.tag-version }}
-          release_name: Desktop APP ${{ github.event.inputs.tag-version }} (Alpha Testing)
+          release_name: Desktop APP ${{ github.event.inputs.tag-version }} (Beta Testing)
           draft: ${{ github.event.inputs.is-draft }}
           prerelease: ${{ github.event.inputs.is-pre-release }}
 
@@ -280,8 +301,8 @@ jobs:
           asset_name: logseq-darwin-x64-${{ github.event.inputs.tag-version }}.dmg
           asset_content_type: application/x-apple-diskimage
 
-      - name: Upload Linux Artifact
-        id: upload-linux-artifact
+      - name: Upload Linux Artifact With Zip format
+        id: upload-linux-artifact-with-zip-format
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -290,6 +311,17 @@ jobs:
           asset_path: ./Logseq-linux.zip
           asset_name: logseq-linux-x64-${{ github.event.inputs.tag-version }}.zip
           asset_content_type: application/zip
+
+      - name: Upload Linux Artifact With AppImage format
+        id: upload-linux-artifact-with-appimage-format
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./Logseq-linux.AppImage
+          asset_name: logseq-linux-x64-${{ github.event.inputs.tag-version }}.AppImage
+          asset_content_type: application/octet-stream
 
       - name: Upload Windows Artifact
         id: upload-win-artifact

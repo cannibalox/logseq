@@ -3,6 +3,7 @@
             [reitit.frontend.easy :as rfe]
             [reitit.frontend.history :as rfh]
             [frontend.state :as state]
+            [frontend.handler.plugin :as plugin-handler]
             [goog.dom :as gdom]
             [frontend.handler.ui :as ui-handler]
             [frontend.db :as db]
@@ -15,9 +16,9 @@
   "If `push` is truthy, previous page will be left in history."
   [{:keys [to path-params query-params push]
     :or {push true}}]
-  (if push
-    (rfe/push-state to path-params query-params)
-    (rfe/replace-state to path-params query-params)))
+  (let [route-fn (if push rfe/push-state rfe/replace-state)]
+    (state/save-scroll-position! (util/scroll-top))
+    (route-fn to path-params query-params)))
 
 (defn redirect-to-home!
   []
@@ -41,7 +42,7 @@
     :all-journals
     "All journals"
     :file
-    (str "File " (util/url-decode (:path path-params)))
+    (str "File " (:path path-params))
     :new-page
     "Create a new page"
     :page
@@ -55,13 +56,12 @@
               (str (subs content 0 48) "...")
               content))
           "Page no longer exists!!")
-        (let [page (util/url-decode name)
-              page (db/pull [:page/name (string/lower-case page)])]
-          (or (:page/original-name page)
-              (:page/name page)
+        (let [page (db/pull [:block/name (string/lower-case name)])]
+          (or (:block/original-name page)
+              (:block/name page)
               "Logseq"))))
     :tag
-    (str "#" (util/url-decode (:name path-params)))
+    (str "#"  (:name path-params))
     :diff
     "Git diff"
     :draw
@@ -78,28 +78,39 @@
         title (get-title (:name data) path-params)]
     (util/set-title! title)))
 
+(defn update-page-label!
+  [route]
+  (let [{:keys [data]} route]
+    (set! (. js/document.body.dataset -page) (name (:name data)))))
+
 (defn jump-to-anchor!
   [anchor-text]
   (when anchor-text
-    (ui-handler/highlight-element! anchor-text)))
+    (js/setTimeout #(ui-handler/highlight-element! anchor-text) 200)))
 
 (defn set-route-match!
   [route]
   (let [route route]
     (swap! state/state assoc :route-match route)
     (update-page-title! route)
-    (when-let [anchor (get-in route [:query-params :anchor])]
+    (update-page-label! route)
+    (if-let [anchor (get-in route [:query-params :anchor])]
       (jump-to-anchor! anchor)
-      (util/scroll-to-top))))
+      (util/scroll-to (util/app-scroll-container-node)
+                      (state/get-saved-scroll-position)
+                      false))
+    (plugin-handler/hook-plugin-app :route-changed (select-keys route [:template :path :parameters]))))
 
 (defn go-to-search!
-  []
+  [search-mode]
+  (when search-mode
+    (state/set-search-mode! search-mode))
   (when-let [element (gdom/getElement "search-field")]
     (.focus element)))
 
 (defn go-to-journals!
   []
-  (state/set-journals-length! 1)
+  (state/set-journals-length! 2)
   (let [route (if (state/custom-home-page?)
                 :all-journals
                 :home)]
