@@ -1,9 +1,8 @@
 (ns frontend.components.page
   (:require [rum.core :as rum]
-            [frontend.util :as util :refer-macros [profile]]
+            [frontend.util :as util :refer [profile]]
             [frontend.util.marker :as marker]
             [frontend.tools.html-export :as html-export]
-            [frontend.handler.file :as file]
             [frontend.handler.page :as page-handler]
             [frontend.handler.ui :as ui-handler]
             [frontend.handler.common :as common-handler]
@@ -20,6 +19,7 @@
             [frontend.components.svg :as svg]
             [frontend.components.export :as export]
             [frontend.extensions.graph-2d :as graph-2d]
+            [frontend.components.hierarchy :as hierarchy]
             [frontend.ui :as ui]
             [frontend.components.content :as content]
             [frontend.config :as config]
@@ -203,6 +203,7 @@
 
        [:input.form-input.block.w-full.sm:text-sm.sm:leading-5.my-2
         {:auto-focus true
+         :default-value title
          :on-change (fn [e]
                       (reset! input (util/evalue e)))}]
 
@@ -270,10 +271,6 @@
                                               :block/original-name path-page-name
                                               :block/uuid (db/new-block-id)}]))
                        (db/pull [:block/name page-name])))
-              _ (when (and (not block?) (db/page-empty? (state/get-current-repo) (:db/id page)))
-                  (page-handler/create! page-name {:page-map page
-                                                   :redirect? false
-                                                   :create-first-block? false}))
               {:keys [title] :as properties} (:block/properties page)
               page-name (:block/name page)
               page-original-name (:block/original-name page)
@@ -406,6 +403,9 @@
             (rum/with-key
               (reference/references route-page-name false)
               (str route-page-name "-refs"))]
+
+           (when (text/namespace-page? route-page-name)
+             (hierarchy/structures route-page-name))
 
            ;; TODO: or we can lazy load them
            (when-not sidebar?

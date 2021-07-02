@@ -74,6 +74,9 @@
    ;; first block that's not a heading or unordered list
    :block/pre-block? {}
 
+   ;; heading's level (the block must be a heading)
+   :block/heading-level {}
+
    ;; scheduled day
    :block/scheduled {}
 
@@ -94,6 +97,8 @@
    ;; whether page's is a journal
    :block/journal? {}
    :block/journal-day {}
+   ;; page's namespace
+   :block/namespace {:db/valueType :db.type/ref}
 
    ;; block's file
    :block/file {:db/valueType :db.type/ref}
